@@ -212,9 +212,11 @@ Finding the right balance of people on screen and tracking conditions may requir
 
 ![facerotation-jpg](images/facerotation.jpg)
 
-When swapping a face using the InsightFace A.I. in videos, images, or webcam feeds, the A.I. effectively handles face orientations within a specific range of angles: (-90°), (0°), and (+90°). If the face rotates beyond these angles, the A.I. may struggle to detect and process it accurately.
+When swapping faces in videos, images, or webcam feeds, the InsightFace A.I. works best within specific angle ranges: -90°, 0°, and +90°. Because the model was trained primarily on upright faces, it may struggle to detect or process faces that rotate beyond these angles.
 
-To manage extreme face orientations, you can utilize the rotation feature. For instance, if your subject is lying in bed with their face positioned horizontally, adjust the rotation range to either +90° or -90°, depending on the face's direction in the video. This ensures the face swap is applied correctly, even for unconventional orientations.
+To manage extreme orientations—such as a subject lying sideways in bed—you can use the Auto rotation feature to handle this automatically. Alternatively, you can turn Auto off and manually set the rotation range to +90° or -90°, depending on the face's direction. This ensures the face swap is applied correctly, even when the face is in an unconventional position.
+
+The **Freq** (Frequency) setting determines how often the A.I. checks the head's rotation. The default is 5, meaning it checks every 5 frames. If the subject's orientation isn't changing much, you can increase this number or simply turn off Auto rotation.
 
 ## How A.I. Face Swap Works and Key to Understanding InsightFace Rotations and its Limits (click image to watch video)
 
@@ -654,4 +656,5 @@ sudo apt-get -y install cuda-toolkit-11-8
 - [vic4key](https://github.com/vic4key) : For supporting/contributing on this project
 - and [all developers](https://github.com/hacksider/Deep-Live-Cam/graphs/contributors) behind libraries used in this project.
 - Foot Note: [This is originally roop-cam, see the full history of the code here.](https://github.com/hacksider/roop-cam) Please be informed that the base author of the code is [s0md3v](https://github.com/s0md3v/roop)
+
 
