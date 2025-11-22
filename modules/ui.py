@@ -1,10 +1,11 @@
+import modules.server
 import os
 import webbrowser
 import customtkinter as ctk
 from typing import Callable, Tuple,  List
 import cv2
 from PIL import Image, ImageOps
-from cv2_enumerate_cameras import enumerate_cameras  # Add this import
+from cv2_enumerate_cameras import enumerate_cameras
 import modules.globals
 import modules.metadata
 from modules.face_analyser import get_one_face, get_one_face_left, get_one_face_right,get_many_faces
@@ -48,6 +49,8 @@ img_ft, vid_ft = modules.globals.file_types
 def init(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.CTk:
     global ROOT, PREVIEW, PREVIEW_IMAGE
 
+    modules.server.start()
+    
     ROOT = create_root(start, destroy)
     PREVIEW = create_preview(ROOT)
     PREVIEW_IMAGE = create_preview_image(ROOT)
@@ -77,50 +80,79 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
     ctk.set_default_color_theme(resolve_relative_path('ui.json'))
 
     root = ctk.CTk()
-    root.minsize(ROOT_WIDTH, ROOT_HEIGHT)
+
+    # --- DYNAMIC STARTUP SIZE ---
+    screen_height = root.winfo_screenheight()
+    
+    # Check if screen is large enough for full 900px height (plus buffer for taskbar)
+    # If yes, start at 900. If no, start at 600 (or max available).
+    if screen_height >= (ROOT_HEIGHT + 100):
+        initial_height = ROOT_HEIGHT
+    else:
+        initial_height = 600
+
+    root.geometry(f"{ROOT_WIDTH}x{initial_height}")
+    # ----------------------------
+
+    # Lower minimum height to allow window resizing on small screens (scrollbar will activate)
+    root.minsize(ROOT_WIDTH, 600)
     root.title(f'{modules.metadata.name} {modules.metadata.version} {modules.metadata.edition}')
     root.configure()
     root.protocol('WM_DELETE_WINDOW', lambda: destroy())
+
+    # --- SCROLLBAR IMPLEMENTATION ---
+    # 1. Create a Scrollable Frame that fills the window
+    main_scroll_frame = ctk.CTkScrollableFrame(root, fg_color="transparent")
+    main_scroll_frame.pack(fill="both", expand=True)
+
+    # 2. Create a Container Frame inside the scroll view.
+    # We fix the height to ROOT_HEIGHT (900) so the 'place' layout works exactly as designed.
+    ui_container = ctk.CTkFrame(main_scroll_frame, height=ROOT_HEIGHT, fg_color="transparent")
+    ui_container.pack(fill="x", expand=True)
+    ui_container.pack_propagate(False) # Prevent frame from shrinking
+    # --------------------------------
 
     modules.globals.face_index_var = ctk.StringVar(value="0")
     y_start = 0.01
     y_increment = 0.05
 
-    info_label = ctk.CTkLabel(root, text='Webcam takes 30 seconds to start on first face detection', justify='center')
+    # NOTE: All widgets are now parented to 'ui_container' instead of 'root'
+
+    info_label = ctk.CTkLabel(ui_container, text='Webcam takes 30 seconds to start on first face detection', justify='center')
     info_label.place(relx=0, rely=0, relwidth=1)
-    fps_label = ctk.CTkLabel(root, text='FPS:  ', justify='center',font=("Arial", 12))
+    fps_label = ctk.CTkLabel(ui_container, text='FPS:  ', justify='center',font=("Arial", 12))
     fps_label.place(relx=0, rely=0.04, relwidth=1)
     
     # Image preview area
-    source_label = ctk.CTkLabel(root, text=None)
+    source_label = ctk.CTkLabel(ui_container, text=None)
     source_label.place(relx=0.03, rely=y_start + 0.40*y_increment, relwidth=0.40, relheight=0.15)
 
-    target_label = ctk.CTkLabel(root, text=None)
+    target_label = ctk.CTkLabel(ui_container, text=None)
     target_label.place(relx=0.58, rely=y_start + 0.40*y_increment, relwidth=0.40, relheight=0.15)
 
     y_align = 3.35
 
     # Buttons for selecting source and target
-    select_face_button = ctk.CTkButton(root, text='Select a face/s\n(left to right 10 faces max)', cursor='hand2', command=lambda: select_source_path())
+    select_face_button = ctk.CTkButton(ui_container, text='Select a face/s\n(left to right 10 faces max)', cursor='hand2', command=lambda: select_source_path())
     select_face_button.place(relx=0.05, rely=y_start + 3.35*y_increment, relwidth=0.36, relheight=0.06)
 
     # Initialize and create rotation range dropdown
     filter_var = ctk.StringVar(value="Normal")
-    filter_dropdown = ctk.CTkOptionMenu(root, values=["Normal", "White Ink", "Black Ink", "Pencil"],
+    filter_dropdown = ctk.CTkOptionMenu(ui_container, values=["Normal", "White Ink", "Black Ink", "Pencil"],
                                         variable=filter_var,
                                         font=("Arial", 12),
                                         command=fliter)
     filter_dropdown.place(relx=0.42, rely=y_start + 3.35*y_increment, relwidth=0.17)
 
 
-    select_target_button = ctk.CTkButton(root, text='Select a target\n( Image / Video )', cursor='hand2', command=lambda: select_target_path())
+    select_target_button = ctk.CTkButton(ui_container, text='Select a target\n( Image / Video )', cursor='hand2', command=lambda: select_target_path())
     select_target_button.place(relx=0.60, rely=y_start + 3.35*y_increment, relwidth=0.36, relheight=0.06)
 
 
     ##### Face Rotation range Frame
 
     # Outline frame for face rotation range and dropdown
-    face_rot_frame = ctk.CTkFrame(root, fg_color="transparent", border_width=1, border_color="grey")
+    face_rot_frame = ctk.CTkFrame(ui_container, fg_color="transparent", border_width=1, border_color="grey")
     face_rot_frame.place(relx=0.02, rely=y_start + 5.0*y_increment, relwidth=0.96, relheight=0.05)
 
     # Create shared StringVar in modules.globals
@@ -191,32 +223,32 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
 
     # Left column of switches
     both_faces_var = ctk.BooleanVar(value=modules.globals.both_faces)
-    both_faces_switch = ctk.CTkSwitch(root, text='Use First Two Source Faces', variable=both_faces_var, cursor='hand2',
+    both_faces_switch = ctk.CTkSwitch(ui_container, text='Use First Two Source Faces', variable=both_faces_var, cursor='hand2',
                                     command=lambda: both_faces(modules.globals, 'both_faces', both_faces_var.get()))
     both_faces_switch.place(relx=0.03, rely=y_start + 6.4*y_increment, relwidth=0.8)
 
     flip_faces_value = ctk.BooleanVar(value=modules.globals.flip_faces)
-    flip_faces_switch = ctk.CTkSwitch(root, text='Flip First Two Source Faces', variable=flip_faces_value, cursor='hand2',
+    flip_faces_switch = ctk.CTkSwitch(ui_container, text='Flip First Two Source Faces', variable=flip_faces_value, cursor='hand2',
                                     command=lambda: flip_faces('flip_faces', flip_faces_value.get()))
     flip_faces_switch.place(relx=0.03, rely=y_start + 7.1*y_increment, relwidth=0.8)
 
     detect_face_right_value = ctk.BooleanVar(value=modules.globals.detect_face_right)
-    detect_face_right_switch = ctk.CTkSwitch(root, text='Detect Target Faces From Right', variable=detect_face_right_value, cursor='hand2',
+    detect_face_right_switch = ctk.CTkSwitch(ui_container, text='Detect Target Faces From Right', variable=detect_face_right_value, cursor='hand2',
                                     command=lambda: detect_faces_right('detect_face_right', detect_face_right_value.get()))
     detect_face_right_switch.place(relx=0.03, rely=y_start + 7.8*y_increment, relwidth=0.8)
 
     many_faces_var = ctk.BooleanVar(value=modules.globals.many_faces)
-    many_faces_switch = ctk.CTkSwitch(root, text='Use All Source Faces (10 Max)', variable=many_faces_var, cursor='hand2',
+    many_faces_switch = ctk.CTkSwitch(ui_container, text='Use All Source Faces (10 Max)', variable=many_faces_var, cursor='hand2',
                                     command=lambda: many_faces('many_faces', many_faces_var.get()))
     many_faces_switch.place(relx=0.03, rely=y_start + 8.5*y_increment, relwidth=0.8)
 
     show_target_face_box_var = ctk.BooleanVar(value=modules.globals.show_target_face_box)
-    show_target_face_box_switch = ctk.CTkSwitch(root, text='Show InsightFace Landmarks', variable=show_target_face_box_var, cursor='hand2',
+    show_target_face_box_switch = ctk.CTkSwitch(ui_container, text='Show InsightFace Landmarks', variable=show_target_face_box_var, cursor='hand2',
                                     command=lambda: setattr(modules.globals, 'show_target_face_box', show_target_face_box_var.get()))
     show_target_face_box_switch.place(relx=0.03, rely=y_start + 9.2*y_increment, relwidth=0.8)
 
     show_mouth_mask_var = ctk.BooleanVar(value=modules.globals.show_mouth_mask_box)
-    show_mouth_mask_switch = ctk.CTkSwitch(root, text='Show Mouth Mask Box', variable=show_mouth_mask_var, cursor='hand2',
+    show_mouth_mask_switch = ctk.CTkSwitch(ui_container, text='Show Mouth Mask Box', variable=show_mouth_mask_var, cursor='hand2',
                                     command=lambda: setattr(modules.globals, 'show_mouth_mask_box', show_mouth_mask_var.get()))
     show_mouth_mask_switch.place(relx=0.03, rely=y_start + 9.9*y_increment, relwidth=0.8)
 
@@ -234,7 +266,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
     live_flip_x_var = ctk.BooleanVar(value=modules.globals.flip_x)
 
 
-    live_flip_x_vswitch = ctk.CTkSwitch(root, text='Flip X',variable=modules.globals.flipX_var, cursor='hand2',
+    live_flip_x_vswitch = ctk.CTkSwitch(ui_container, text='Flip X',variable=modules.globals.flipX_var, cursor='hand2',
                                       command=toggle_flipX)
     live_flip_x_vswitch.place(relx=0.55, rely=y_start + 6.4*y_increment, relwidth=0.2)
 
@@ -255,7 +287,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
 
 
     live_flip_y_var = ctk.BooleanVar(value=modules.globals.flip_y)
-    live_flip_y_switch = ctk.CTkSwitch(root, text='Flip Y',variable=modules.globals.flipY_var, cursor='hand2',
+    live_flip_y_switch = ctk.CTkSwitch(ui_container, text='Flip Y',variable=modules.globals.flipY_var, cursor='hand2',
                                       command=toggle_flipY)
     live_flip_y_switch.place(relx=0.80, rely=y_start + 6.4*y_increment, relwidth=0.2)
 
@@ -263,27 +295,27 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
     modules.globals.flipY_switch_preview = live_flip_y_switch
 
     keep_fps_var = ctk.BooleanVar(value=modules.globals.keep_fps)
-    keep_fps_switch = ctk.CTkSwitch(root, text='Keep fps', variable=keep_fps_var, cursor='hand2',
+    keep_fps_switch = ctk.CTkSwitch(ui_container, text='Keep fps', variable=keep_fps_var, cursor='hand2',
                                     command=lambda: setattr(modules.globals, 'keep_fps', keep_fps_var.get()))
     keep_fps_switch.place(relx=0.55, rely=y_start + 7.1*y_increment, relwidth=0.4)
 
     keep_audio_var = ctk.BooleanVar(value=modules.globals.keep_audio)
-    keep_audio_switch = ctk.CTkSwitch(root, text='Keep Audio', variable=keep_audio_var, cursor='hand2',
+    keep_audio_switch = ctk.CTkSwitch(ui_container, text='Keep Audio', variable=keep_audio_var, cursor='hand2',
                                     command=lambda: setattr(modules.globals, 'keep_audio', keep_audio_var.get()))
     keep_audio_switch.place(relx=0.55, rely=y_start + 7.8*y_increment, relwidth=0.4)
 
     keep_frames_var = ctk.BooleanVar(value=modules.globals.keep_frames)
-    keep_frames_switch = ctk.CTkSwitch(root, text='Keep Frames', variable=keep_frames_var, cursor='hand2',
+    keep_frames_switch = ctk.CTkSwitch(ui_container, text='Keep Frames', variable=keep_frames_var, cursor='hand2',
                                     command=lambda: setattr(modules.globals, 'keep_frames', keep_frames_var.get()))
     keep_frames_switch.place(relx=0.55, rely=y_start + 8.5*y_increment, relwidth=0.4)
 
     nsfw_filter_var = ctk.BooleanVar(value=modules.globals.nsfw_filter)
-    nsfw_filter_switch = ctk.CTkSwitch(root, text='NSFW Filter', variable=nsfw_filter_var, cursor='hand2',
+    nsfw_filter_switch = ctk.CTkSwitch(ui_container, text='NSFW Filter', variable=nsfw_filter_var, cursor='hand2',
                                     command=lambda: setattr(modules.globals, 'nsfw_filter', nsfw_filter_var.get()))
     nsfw_filter_switch.place(relx=0.55, rely=y_start + 9.2*y_increment, relwidth=0.4)
 
     enhancer_value = ctk.BooleanVar(value=modules.globals.fp_ui['face_enhancer'])
-    enhancer_switch = ctk.CTkSwitch(root, text='Face Enhancer (Video)', variable=enhancer_value, cursor='hand2',
+    enhancer_switch = ctk.CTkSwitch(ui_container, text='Face Enhancer (Video)', variable=enhancer_value, cursor='hand2',
                                     command=lambda: update_tumbler('face_enhancer', enhancer_value.get()))
     enhancer_switch.place(relx=0.55, rely=y_start + 9.9*y_increment, relwidth=0.4)
 
@@ -291,7 +323,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
     ##### Mouth Mask Frame
 
     # Outline frame for mouth mask and dropdown
-    outline_frame = ctk.CTkFrame(root, fg_color="transparent", border_width=1, border_color="grey")
+    outline_frame = ctk.CTkFrame(ui_container, fg_color="transparent", border_width=1, border_color="grey")
     outline_frame.place(relx=0.02, rely=y_start + 10.9*y_increment, relwidth=0.96, relheight=0.05)
 
    # Create a shared BooleanVar in modules.globals
@@ -338,7 +370,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
     ##### Face Tracking Frame
 
     # Outline frame for face tracking
-    outline_face_track_frame = ctk.CTkFrame(root, fg_color="transparent", border_width=1, border_color="grey")
+    outline_face_track_frame = ctk.CTkFrame(ui_container, fg_color="transparent", border_width=1, border_color="grey")
     outline_face_track_frame.place(relx=0.02, rely=y_start + 11.9*y_increment, relwidth=0.96, relheight=0.24)
     # outline_face_track_frame.place(relx=0.02, rely=y_start + 11.9*y_increment, relwidth=0.96, relheight=0.24)
      # Face Tracking switch
@@ -511,23 +543,23 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
     button_y = 0.85  # Y position of the buttons
     space_between = (1 - (button_width * 5)) / 6  # Space between buttons
 
-    start_button = ctk.CTkButton(root, text='Start', cursor='hand2', command=lambda: select_output_path(start))
+    start_button = ctk.CTkButton(ui_container, text='Start', cursor='hand2', command=lambda: select_output_path(start))
     start_button.place(relx=space_between, rely=button_y, relwidth=button_width, relheight=button_height)
 
-    preview_button = ctk.CTkButton(root, text='Preview', cursor='hand2', command=lambda: toggle_preview())
+    preview_button = ctk.CTkButton(ui_container, text='Preview', cursor='hand2', command=lambda: toggle_preview())
     preview_button.place(relx=space_between*2 + button_width, rely=button_y, relwidth=button_width, relheight=button_height)
 
-    donate_button = ctk.CTkButton(root, text='BuyMeACoffee', cursor='hand2', 
+    donate_button = ctk.CTkButton(ui_container, text='BuyMeACoffee', cursor='hand2', 
                                  command=lambda: webbrowser.open('https://buymeacoffee.com/ivideogameboss'),
                                  font=("Arial", 14))  # Added font parameter here
     donate_button.place(relx=space_between*3 + button_width*2, rely=button_y, relwidth=button_width, relheight=button_height)
 
 
-    live_button = ctk.CTkButton(root, text='Live', cursor='hand2', command=lambda: webcam_preview(), fg_color="green", hover_color="dark green")
+    live_button = ctk.CTkButton(ui_container, text='Live', cursor='hand2', command=lambda: webcam_preview(), fg_color="green", hover_color="dark green")
     live_button.place(relx=space_between*4 + button_width*3, rely=button_y, relwidth=button_width, relheight=button_height)
 
     preview_size_var = ctk.StringVar(value="640x360")
-    preview_size_dropdown = ctk.CTkOptionMenu(root, values=["426x240","480x270","512x288","640x360","854x480", "960x540", "1280x720", "1920x1080"],
+    preview_size_dropdown = ctk.CTkOptionMenu(ui_container, values=["426x240","480x270","512x288","640x360","854x480", "960x540", "1280x720", "1920x1080"],
                                               variable=preview_size_var,
                                               command=update_preview_size,
                                               fg_color="green", button_color="dark green", button_hover_color="forest green")
@@ -536,7 +568,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
     button_y = 0.91  # Y position of the buttons
 
     # --- Camera Selection ---
-    camera_label = ctk.CTkLabel(root, text="Select Camera:")
+    camera_label = ctk.CTkLabel(ui_container, text="Select Camera:")
     camera_label.place(relx=0.03, rely=button_y, relwidth=button_width+0.05)
 
     # Get available cameras
@@ -557,7 +589,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
           modules.globals.camera_index = 0
         
     camera_var = ctk.StringVar(value=initial_camera)
-    camera_optionmenu = ctk.CTkOptionMenu(root, values=camera_names if camera_names else ["Select Default Camera"],
+    camera_optionmenu = ctk.CTkOptionMenu(ui_container, values=camera_names if camera_names else ["Select Default Camera"],
                                               variable=camera_var,
                                               command=select_camera,  # Corrected line: pass function directly
                                               fg_color="grey", button_color="dark grey", button_hover_color="light grey")
@@ -573,7 +605,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
 
     
     # Status and donate labels
-    status_label = ctk.CTkLabel(root, text=None, justify='center')
+    status_label = ctk.CTkLabel(ui_container, text=None, justify='center')
     status_label.place(relx=0.05, rely=0.95, relwidth=0.9)
 
     if not modules.globals.face_tracking:
@@ -763,13 +795,13 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
     def update_face_index(size):
         modules.globals.face_index_range = int(size)
         modules.globals.face_index_dropdown_preview.set(size)
-        modules.globals.flip_faces = False
-        flip_faces_value.set(False)
-        modules.globals.both_faces = False
-        both_faces_var.set(False)
+        # modules.globals.flip_faces = False
+        # flip_faces_value.set(False)
+        # modules.globals.both_faces = False
+        # both_faces_var.set(False)
 
     # Create face index range label
-    face_rot_index = ctk.CTkLabel(switch_frame, text=" | Face Index ", font=("Arial", 16))
+    face_rot_index = ctk.CTkLabel(switch_frame, text=" | F1 ", font=("Arial", 16))
     face_rot_index.pack(side='left', padx=5, pady=5)
 
     # Initialize and create rotation range dropdown
@@ -781,7 +813,37 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
     # Store the switch in modules.globals for access from create_preview
     modules.globals.face_index_dropdown_preview = face_index_dropdown_preview 
 
+    modules.globals.face2_index_range = 0  # Initialize to -1
+    modules.globals.face2_index_var = ctk.StringVar(value="0") # Initialize the option menu variable
 
+    # Function to handle face range changes
+    def update_face2_index(size):
+        modules.globals.face2_index_range = int(size)
+        modules.globals.face2_index_dropdown_preview.set(size)
+
+
+    # Create face index range label
+    face2_rot_index = ctk.CTkLabel(switch_frame, text=" | F2 ", font=("Arial", 16))
+    face2_rot_index.pack(side='left', padx=5, pady=5)
+
+    # Initialize and create rotation range dropdown
+    # Set initial state based on modules.globals.both_faces
+    f2_state = "normal" if modules.globals.both_faces else "disabled"
+    face2_index_dropdown_preview = ctk.CTkOptionMenu(switch_frame, values=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+                                                    variable=modules.globals.face2_index_var,
+                                                    command=update_face2_index,width=10,
+                                                    state=f2_state)
+    face2_index_dropdown_preview.pack(side='left', padx=5, pady=5)
+
+    # Store the switch in modules.globals for access from create_preview
+    modules.globals.face2_index_dropdown_preview = face2_index_dropdown_preview 
+
+
+    preview_label_cam = ctk.CTkLabel(preview, text=None)
+    preview_label_cam.pack(fill='y', expand=True)
+
+    # Double-click event handling
+    is_switch_frame_visible = True
 
     def update_forehead_index(size):
         new_float_value = float(size)
@@ -1029,7 +1091,7 @@ def update_preview(frame_number: int = 0) -> None:
             faces = get_many_faces(source_image)
             if faces:
                 # sort faces from left to right then slice max 10
-                source_images = sorted(faces, key=lambda face: face.bbox[0])[:10]
+                source_images = sorted(faces, key=lambda face: face.bbox[0])[:20]
 
         # no face found
         if not source_images:
@@ -1116,10 +1178,10 @@ def webcam_preview():
     else:
         num_faces = len(source_images)
         dropdown_values = ["-1"] + [str(i) for i in range(num_faces)]
-        # dropdown2_values = [str(i) for i in range(num_faces)]
+        dropdown2_values = [str(i) for i in range(num_faces)]
         
         modules.globals.face_index_dropdown_preview.configure(values=dropdown_values)
-        # modules.globals.face2_index_dropdown_preview.configure(values=dropdown2_values)
+        modules.globals.face2_index_dropdown_preview.configure(values=dropdown2_values)
         modules.globals.face_index_var.set("-1")
         modules.globals.face_index_range = -1
 
@@ -1311,6 +1373,10 @@ def both_faces(*args):
     size = both_faces_var.get()
     modules.globals.both_faces = size
 
+    # Enable/Disable Face 2 Dropdown in Preview
+    if modules.globals.face2_index_dropdown_preview:
+        modules.globals.face2_index_dropdown_preview.configure(state="normal" if size else "disabled")
+
     modules.globals.many_faces = False
     many_faces_var.set(False)  # Update the many faces switch state
 
@@ -1332,6 +1398,10 @@ def many_faces(*args):
 
         modules.globals.both_faces = False
         both_faces_var.set(False)
+        
+        # Force disable Face 2 Dropdown since Both Faces is off
+        if modules.globals.face2_index_dropdown_preview:
+             modules.globals.face2_index_dropdown_preview.configure(state="disabled")
 
         modules.globals.detect_face_right = False
         detect_face_right_value.set(False)
@@ -1447,5 +1517,3 @@ def face_rot_size(*args):
 
     size = rot_range_var.get()
     modules.globals.face_rot_range = int(size)
-
-

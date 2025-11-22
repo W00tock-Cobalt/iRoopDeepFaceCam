@@ -600,6 +600,8 @@ def process_frame(source_face: List[Face], temp_frame: Frame) -> Frame:
     active_source_index = 1 if modules.globals.flip_faces else 0 # If we should flip the source faces
     source_face_order = [1, 0] if modules.globals.flip_faces else [0, 1] # If we should flip the source faces
 
+
+
     if modules.globals.many_faces: # If we should swap many faces
          if modules.globals.face_tracking: # If we are tracking faces
             for i, target_face in enumerate(target_faces): # Loop through all the faces
@@ -617,6 +619,7 @@ def process_frame(source_face: List[Face], temp_frame: Frame) -> Frame:
                 temp_frame = _process_face_swap(temp_frame, source_face, target_face, source_index) # Swap the face
     else:
         faces_to_process = 2 if modules.globals.both_faces and len(source_face) > 1 else 1 # If we're swapping two faces, process two faces, otherwise process one
+
         for i in range(min(faces_to_process, len(target_faces))):
             if modules.globals.face_index_range != -1:
                 source_index= modules.globals.face_index_range
@@ -638,7 +641,15 @@ def process_frame(source_face: List[Face], temp_frame: Frame) -> Frame:
             else: # If we're not tracking faces
                 if modules.globals.face_index_range != -1:
                     source_index= modules.globals.face_index_range
-                temp_frame = _process_face_swap(temp_frame, source_face, target_faces[i], source_index) # Swap the faces without tracking
+                if modules.globals.both_faces:
+                    if i == 0:
+                        temp_frame = _process_face_swap(temp_frame, source_face, target_faces[i], source_index) # Swap the faces without tracking
+                    if i == 1:
+                        temp_frame = _process_face_swap(temp_frame, source_face, target_faces[i], modules.globals.face2_index_range) # Swap the faces without tracking
+                else:
+                    temp_frame = _process_face_swap(temp_frame, source_face, target_faces[i], source_index) # Swap the faces without tracking
+
+                # temp_frame = _process_face_swap(temp_frame, source_face, target_faces[i], source_index) # Swap the faces without tracking
 
     # Apply mouth masks
     temp_frame = _apply_mouth_masks(temp_frame, target_faces, mouth_masks, face_masks)
