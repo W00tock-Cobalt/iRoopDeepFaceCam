@@ -93,7 +93,11 @@ The core idea is to use AI to analyze faces and their positions within a frame (
 
 ![face_index-jpg](images/faceindex.jpg)
 
-The Face Index dropdown allows you to select a specific face for single-face swapping. It is designed exclusively for single-face swapping and will override both the "Use Fist Two Source Faces" and "Use All Source Faces (10 Max)" options. When you choose a source image containing up to ten faces, this dropdown will automatically populate, enabling you to select the desired face for single face swapping. A value of -1 indicates the use of the automatic face selection system for "Use Fist Two Source Faces" and "Use All Source Faces (10 Max)" modes. When Ever you turn on these two options the Face Index is always set back to -1.
+The F1 dropdown allows you to select a specific face for single-face swapping. It is designed exclusively for single-face swapping and will override "Use All Source Faces (10 Max)" options. When you choose a source image containing up to ten faces, this dropdown will automatically populate, enabling you to select the desired face for single face swapping. A value of -1 indicates the use of the automatic face selection system for "Use All Source Faces (10 Max)" modes. When Ever you turn on this option the Face Index is always set back to -1.
+
+F2 is only enabled when you have "Use Fist Two Source Faces" option switch on. It allows you to choose which faces to use from F1 and F2.
+
+![face_index-jpg](images/faceindex2.jpg)
 
 When you enable "Use All Source Faces (10 Max)", the Face Index is automatically reset to -1. You can then adjust the Face Index to a specific value, and the selected face will be used to swap all detected faces in the target frame with the chosen face.
 
@@ -224,6 +228,19 @@ The **Freq** (Frequency) setting determines how often the A.I. checks the head's
 
 ### click image to watch video [Roop Deep Fake Course](https://youtu.be/BzTqrIm69Ws?si=C4t7jL6CJ9JvdgX0)
 
+# FireFox extension to use with iRoopDeepFaceCam
+
+The included FireFox entension allows you to replace a face on any image/s on a webpage. When you start iRoopDeepFaceCam it will run a server which works with the  FireFox extension.
+
+![firefox_server-jpg](images/firefox_server.jpg)
+
+After you install the extension you can pin it and use it from FireFox on any webpage
+
+![firefox_extension-jpg](images/firefox_extension.jpg)
+
+FireFox entension can replace face/s on images on any webpage. The image is replaced in memory only. No file is saved.
+
+![firefox_faces-jpg](images/firefox_faces.jpg)
 
 ## How do I use it?
 > Note: When you run this program for the first time, it will download some models ~300MB in size.
@@ -656,5 +673,6 @@ sudo apt-get -y install cuda-toolkit-11-8
 - [vic4key](https://github.com/vic4key) : For supporting/contributing on this project
 - and [all developers](https://github.com/hacksider/Deep-Live-Cam/graphs/contributors) behind libraries used in this project.
 - Foot Note: [This is originally roop-cam, see the full history of the code here.](https://github.com/hacksider/roop-cam) Please be informed that the base author of the code is [s0md3v](https://github.com/s0md3v/roop)
+
 
 
