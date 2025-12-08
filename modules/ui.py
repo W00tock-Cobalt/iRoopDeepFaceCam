@@ -1521,8 +1521,9 @@ def flip_faces(*args):
     modules.globals.many_faces = False
     many_faces_var.set(False)  # Update the many faces switch state
     
-    modules.globals.face_index_range= int(-1)
-    modules.globals.face_index_dropdown_preview.set(-1)
+    # Removed reset lines to preserve user selection (e.g., F1=3)
+    # modules.globals.face_index_range= int(-1)
+    # modules.globals.face_index_dropdown_preview.set(-1)
 
     if modules.globals.face_tracking:
         clear_face_tracking_data()

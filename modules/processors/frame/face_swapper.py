@@ -425,8 +425,7 @@ def _process_face_tracking_both(
     target_embedding = extract_face_embedding(target_face)
     target_position = get_face_center(target_face)
     face_id = id(target_face)
-    use_pseudo_face = False
-
+    
     # Store tracked face data as a dictionary
     tracked_faces = {
         0: {
@@ -443,126 +442,121 @@ def _process_face_tracking_both(
         },
     }
     
-    if all(data["embedding"] is not None for data in tracked_faces.values()):
-       
-        best_match_score = -1
-        best_match_index = -1
-        
-        for i, (track_id, track_data) in enumerate(tracked_faces.items()):
-            
-            track_embedding = track_data["embedding"]
-            track_position = track_data["position"]
-            track_history = track_data["history"]
-            
-            if track_embedding is not None and track_position is not None:
-            
-                similarity = cosine_similarity(track_embedding, target_embedding)
-                position_consistency = 1 / (1 + np.linalg.norm(np.array(target_position) - np.array(np.mean(track_history, axis=0) if track_history else track_position))) if track_position is not None else 0
-                
-                EMBEDDING_WEIGHT = modules.globals.embedding_weight_size
-                POSITION_WEIGHT = modules.globals.position_size
-                total = modules.globals.old_embedding_weight + modules.globals.new_embedding_weight
-                OLD_WEIGHT = modules.globals.old_embedding_weight / total
-                NEW_WEIGHT = modules.globals.new_embedding_weight / total
-                TOTAL_WEIGHT = EMBEDDING_WEIGHT * modules.globals.weight_distribution_size + POSITION_WEIGHT
-                
-                score = ((EMBEDDING_WEIGHT * similarity +
-                            POSITION_WEIGHT * position_consistency) / TOTAL_WEIGHT)
-                if track_data["id"] == face_id:
-                    score *= (1 + STICKINESS_FACTOR)
-                    
-                if score > best_match_score:
-                    best_match_score = score
-                    best_match_index = track_id
-        
-        
-        if best_match_index != -1 and best_match_score > modules.globals.sticky_face_value:
-            
-            tracked_face = tracked_faces[best_match_index]
-            
-            # Update the tracked face with a weighted average of the new embedding
-            tracked_face["embedding"] =  OLD_WEIGHT * tracked_face["embedding"] + NEW_WEIGHT * target_embedding
-            
-            #Update position with weighted average
-            avg_position = np.mean(tracked_face["history"], axis=0) if tracked_face["history"] else tracked_face["position"]
-            if avg_position is not None:
-                tracked_face["position"] = np.array(avg_position) * 0.8 + np.array(target_position) * 0.2
-            else:
-                tracked_face["position"] = np.array(target_position)
-            tracked_face["id"] = face_id
-            tracked_face["history"].append(target_position)
-            
-            if best_match_index == 0:
-                modules.globals.target_face1_score = best_match_score
-                # --- APPLY USER DROPDOWN SELECTION FOR FACE 1 ---
-                if modules.globals.face_index_range != -1:
-                    source_index = modules.globals.face_index_range
-                else:
-                    source_index = source_face_order[0]
-            elif best_match_index == 1:
-               modules.globals.target_face2_score = best_match_score
-               # --- APPLY USER DROPDOWN SELECTION FOR FACE 2 ---
-               if hasattr(modules.globals, 'face2_index_range'):
-                    source_index = modules.globals.face2_index_range
-               else:
-                    source_index = source_face_order[1]
-            
+    # 1. ATTEMPT MATCH AGAINST EXISTING TRACKS
+    best_match_score = -1
+    best_match_index = -1
+    
+    EMBEDDING_WEIGHT = modules.globals.embedding_weight_size
+    POSITION_WEIGHT = modules.globals.position_size
+    total = modules.globals.old_embedding_weight + modules.globals.new_embedding_weight
+    OLD_WEIGHT = modules.globals.old_embedding_weight / total
+    NEW_WEIGHT = modules.globals.new_embedding_weight / total
+    TOTAL_WEIGHT = EMBEDDING_WEIGHT * modules.globals.weight_distribution_size + POSITION_WEIGHT
 
-        elif modules.globals.use_pseudo_face and best_match_score < modules.globals.pseudo_face_threshold:
-            use_pseudo_face = True
-            if best_match_index == 0:
-                avg_position = np.mean(first_face_position_history, axis=0) if first_face_position_history else first_face_position
-                # Source for Face 1 on Pseudo
-                if modules.globals.face_index_range != -1:
-                    source_index = modules.globals.face_index_range
-                else:
-                    source_index = source_face_order[0]
-            elif best_match_index == 1:
-                avg_position = np.mean(second_face_position_history, axis=0) if second_face_position_history else second_face_position
-                # Source for Face 2 on Pseudo
-                if hasattr(modules.globals, 'face2_index_range'):
-                    source_index = modules.globals.face2_index_range
-                else:
-                    source_index = source_face_order[1]
-            else:
-                avg_position = target_position
+    for track_id, track_data in tracked_faces.items():
+        track_embedding = track_data["embedding"]
+        track_position = track_data["position"]
+        track_history = track_data["history"]
+        
+        if track_embedding is not None:
+            similarity = cosine_similarity(track_embedding, target_embedding)
+            position_consistency = 1 / (1 + np.linalg.norm(np.array(target_position) - np.array(np.mean(track_history, axis=0) if track_history else track_position))) if track_position is not None else 0
             
-            pseudo_face = create_pseudo_face(avg_position)
-            return _process_face_swap(frame, source_face, pseudo_face, source_index)    
+            score = ((EMBEDDING_WEIGHT * similarity +
+                        POSITION_WEIGHT * position_consistency) / TOTAL_WEIGHT)
+            
+            if track_data["id"] == face_id:
+                score *= (1 + STICKINESS_FACTOR)
+                
+            if score > best_match_score:
+                best_match_score = score
+                best_match_index = track_id
+
+    matched_track_id = -1
+    use_pseudo_face = False
+
+    # 2. DECIDE: MATCH, INIT, OR PSEUDO
+    if best_match_index != -1 and best_match_score > modules.globals.sticky_face_value:
+        # Match found
+        matched_track_id = best_match_index
+        
+        # Update Track
+        tracked_face = tracked_faces[matched_track_id]
+        tracked_face["embedding"] = OLD_WEIGHT * tracked_face["embedding"] + NEW_WEIGHT * target_embedding
+        avg_position = np.mean(tracked_face["history"], axis=0) if tracked_face["history"] else tracked_face["position"]
+        if avg_position is not None:
+            tracked_face["position"] = np.array(avg_position) * 0.8 + np.array(target_position) * 0.2
         else:
-            return frame
+            tracked_face["position"] = np.array(target_position)
+        tracked_face["id"] = face_id
+        tracked_face["history"].append(target_position)
         
+        # Update Scores Global
+        if matched_track_id == 0:
+            modules.globals.target_face1_score = best_match_score
+        else:
+            modules.globals.target_face2_score = best_match_score
+
     else:
-        # Initialization of one or both faces
-        # We determine which track to fill based on which one is empty (None)
-        
+        # No match, try to initialize an empty track
         if first_face_embedding is None:
+            # Init Track 0
+            matched_track_id = 0
             first_face_embedding = target_embedding
             first_face_position = target_position
             first_face_id = face_id
             first_face_position_history.append(target_position)
-            # Use Dropdown 1 Selection
-            if modules.globals.face_index_range != -1:
-                source_index = modules.globals.face_index_range
-            else:
-                source_index = source_face_order[0]
-
         elif second_face_embedding is None:
+            # Init Track 1
+            matched_track_id = 1
             second_face_embedding = target_embedding
             second_face_position = target_position
             second_face_id = face_id
             second_face_position_history.append(target_position)
-            # Use Dropdown 2 Selection
-            if hasattr(modules.globals, 'face2_index_range'):
-                source_index = modules.globals.face2_index_range
-            else:
-                source_index = source_face_order[1]
+        elif modules.globals.use_pseudo_face and best_match_score < modules.globals.pseudo_face_threshold:
+            # Both full, pseudo face fallback
+            use_pseudo_face = True
+            matched_track_id = best_match_index # Use best bad match for pseudo location
     
-    if use_pseudo_face:
-        # Pseudo face logic handles source_index internally in the block above
-        pass 
-    else:
-         return _process_face_swap(frame, source_face, target_face, source_index)
+    # 3. DETERMINE SOURCE INDEX (Applying Flip Logic)
+    if matched_track_id != -1:
+        # Resolve explicit user selections
+        selection_1 = modules.globals.face_index_range
+        if selection_1 == -1: selection_1 = 0
+        
+        selection_2 = 0
+        if hasattr(modules.globals, 'face2_index_range'):
+            selection_2 = modules.globals.face2_index_range
+        
+        final_idx = 0
+        
+        # Apply Logic:
+        # Track 0 (Left/F1) -> Normal: Sel1, Flip: Sel2
+        # Track 1 (Right/F2) -> Normal: Sel2, Flip: Sel1
+        
+        if matched_track_id == 0:
+            if modules.globals.flip_faces:
+                final_idx = selection_2
+            else:
+                final_idx = selection_1
+        elif matched_track_id == 1:
+            if modules.globals.flip_faces:
+                final_idx = selection_1
+            else:
+                final_idx = selection_2
+
+        # 4. SWAP
+        if use_pseudo_face:
+            # Generate pseudo face at track location
+            track_hist = tracked_faces[matched_track_id]["history"]
+            track_pos = tracked_faces[matched_track_id]["position"]
+            avg_pos = np.mean(track_hist, axis=0) if track_hist else track_pos
+            pseudo_face = create_pseudo_face(avg_pos)
+            return _process_face_swap(frame, source_face, pseudo_face, final_idx)
+        else:
+            return _process_face_swap(frame, source_face, target_face, final_idx)
+            
+    return frame
 
 def _process_face_tracking_many(
     frame: Frame, source_face: List[Face], target_face: Face, source_index: int, source_face_order: List[int]
@@ -705,13 +699,21 @@ def process_frame(source_face: List[Face], temp_frame: Frame) -> Frame:
         reset_face_tracking() # Reset the face tracking
         modules.globals.face_tracking_value = False # Set the button to false
 
-    # Select which faces to process
-    target_faces = _select_target_faces(all_faces)
-
-    # Limit number of faces
-    target_faces = _limit_target_faces(target_faces)
+     # Select which faces to process
+    if modules.globals.face_tracking and modules.globals.both_faces:
+         # If tracking both, we MUST look at ALL faces to find the tracks, 
+         # regardless of position.
+         if modules.globals.detect_face_right:
+             target_faces = sorted(all_faces, key=lambda face: -face.bbox[0])
+         else:
+             target_faces = sorted(all_faces, key=lambda face: face.bbox[0])
+    else:
+        # Standard Selection (Strict Limits)
+        target_faces = _select_target_faces(all_faces)
+        target_faces = _limit_target_faces(target_faces)
 
     # Pre-compute mouth masks if needed
+    # Note: _compute_mouth_masks logic handles variable length lists safely
     mouth_masks, face_masks = _compute_mouth_masks(target_faces, temp_frame)
 
     # Determine source face order
@@ -734,9 +736,16 @@ def process_frame(source_face: List[Face], temp_frame: Frame) -> Frame:
                     source_index = i % len(source_face)  # Get the index of the source face to use
                 temp_frame = _process_face_swap(temp_frame, source_face, target_face, source_index) # Swap the face
     else:
-        faces_to_process = 2 if modules.globals.both_faces and len(source_face) > 1 else 1 # If we're swapping two faces, process two faces, otherwise process one
+        # Determine loop range
+        if modules.globals.face_tracking and modules.globals.both_faces:
+             # Loop over ALL candidates to find the tracks
+             loop_range = len(target_faces)
+        else:
+             # Standard limit
+             faces_to_process = 2 if modules.globals.both_faces and len(source_face) > 1 else 1 
+             loop_range = min(faces_to_process, len(target_faces))
 
-        for i in range(min(faces_to_process, len(target_faces))):
+        for i in range(loop_range):
             if modules.globals.face_index_range != -1:
                 source_index= modules.globals.face_index_range
             else: 
@@ -758,13 +767,30 @@ def process_frame(source_face: List[Face], temp_frame: Frame) -> Frame:
                 if modules.globals.face_index_range != -1:
                     source_index= modules.globals.face_index_range
                 if modules.globals.both_faces:
-                    if i == 0:
-                        temp_frame = _process_face_swap(temp_frame, source_face, target_faces[i], source_index) # Swap the faces without tracking
-                    if i == 1:
-                        temp_frame = _process_face_swap(temp_frame, source_face, target_faces[i], modules.globals.face2_index_range) # Swap the faces without tracking
-                else:
-                    temp_frame = _process_face_swap(temp_frame, source_face, target_faces[i], source_index) # Swap the faces without tracking
+                    # Resolve explicit selections
+                    selection_1 = modules.globals.face_index_range
+                    if selection_1 == -1: selection_1 = 0
+                    
+                    selection_2 = 0
+                    if hasattr(modules.globals, 'face2_index_range'):
+                        selection_2 = modules.globals.face2_index_range
+                    
+                    final_idx = 0
+                    
+                    if i == 0: # Left Target
+                        if modules.globals.flip_faces:
+                            final_idx = selection_2 # Flip: Get F2's selection
+                        else:
+                            final_idx = selection_1 # Normal: Get F1's selection
+                    elif i == 1: # Right Target
+                        if modules.globals.flip_faces:
+                            final_idx = selection_1 # Flip: Get F1's selection
+                        else:
+                            final_idx = selection_2 # Normal: Get F2's selection
 
+                    temp_frame = _process_face_swap(temp_frame, source_face, target_faces[i], final_idx)
+                else:
+                    temp_frame = _process_face_swap(temp_frame, source_face, target_faces[i], source_index) # Swap the faces without
     # Apply mouth masks
     temp_frame = _apply_mouth_masks(temp_frame, target_faces, mouth_masks, face_masks)
 
