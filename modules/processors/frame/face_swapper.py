@@ -409,6 +409,7 @@ def _process_face_tracking_single(
 
     return frame
 
+
 def _process_face_tracking_both(
     frame: Frame, source_face: List[Face], target_face: Face, source_index: int, source_face_order: List[int]
 ) -> Frame:
@@ -427,16 +428,24 @@ def _process_face_tracking_both(
     face_id = id(target_face)
     
     # Store tracked face data as a dictionary
+    # Globals for bounding boxes (Need to persist these)
+    global first_face_bbox, second_face_bbox
+    if 'first_face_bbox' not in globals(): globals()['first_face_bbox'] = None
+    if 'second_face_bbox' not in globals(): globals()['second_face_bbox'] = None
+
+    # Store tracked face data as a dictionary
     tracked_faces = {
         0: {
             "embedding": first_face_embedding,
             "position": first_face_position,
+            "bbox": first_face_bbox,
             "id": first_face_id,
             "history": first_face_position_history
         },
         1: {
             "embedding": second_face_embedding,
             "position": second_face_position,
+            "bbox": second_face_bbox,
             "id": second_face_id,
             "history": second_face_position_history
         },
@@ -446,31 +455,52 @@ def _process_face_tracking_both(
     best_match_score = -1
     best_match_index = -1
     
-    EMBEDDING_WEIGHT = modules.globals.embedding_weight_size
-    POSITION_WEIGHT = modules.globals.position_size
-    total = modules.globals.old_embedding_weight + modules.globals.new_embedding_weight
-    OLD_WEIGHT = modules.globals.old_embedding_weight / total
-    NEW_WEIGHT = modules.globals.new_embedding_weight / total
-    TOTAL_WEIGHT = EMBEDDING_WEIGHT * modules.globals.weight_distribution_size + POSITION_WEIGHT
-
+    # --- FAST PATH: IOU CHECK ---
+    # If the face overlaps significantly with a known tracker, skip the heavy math.
+    iou_threshold = 0.50  # 50% overlap means it's likely the same face
+    
     for track_id, track_data in tracked_faces.items():
-        track_embedding = track_data["embedding"]
-        track_position = track_data["position"]
-        track_history = track_data["history"]
-        
-        if track_embedding is not None:
-            similarity = cosine_similarity(track_embedding, target_embedding)
-            position_consistency = 1 / (1 + np.linalg.norm(np.array(target_position) - np.array(np.mean(track_history, axis=0) if track_history else track_position))) if track_position is not None else 0
-            
-            score = ((EMBEDDING_WEIGHT * similarity +
-                        POSITION_WEIGHT * position_consistency) / TOTAL_WEIGHT)
-            
-            if track_data["id"] == face_id:
-                score *= (1 + STICKINESS_FACTOR)
-                
-            if score > best_match_score:
-                best_match_score = score
+        if track_data["bbox"] is not None:
+            iou = calculate_iou(target_face.bbox, track_data["bbox"])
+            if iou > iou_threshold:
+                # High confidence match based on position
                 best_match_index = track_id
+                best_match_score = 100.0 # Force high score
+                break
+    
+    # --- ROBUST PATH: EMBEDDING CHECK ---
+    # If IOU didn't find a match (face moved fast, or first frame), do the heavy lifting
+    if best_match_index == -1:
+        EMBEDDING_WEIGHT = modules.globals.embedding_weight_size
+        POSITION_WEIGHT = modules.globals.position_size
+        total = modules.globals.old_embedding_weight + modules.globals.new_embedding_weight
+        OLD_WEIGHT = modules.globals.old_embedding_weight / total
+        NEW_WEIGHT = modules.globals.new_embedding_weight / total
+        TOTAL_WEIGHT = EMBEDDING_WEIGHT * modules.globals.weight_distribution_size + POSITION_WEIGHT
+    
+        for track_id, track_data in tracked_faces.items():
+            track_embedding = track_data["embedding"]
+            track_position = track_data["position"]
+            track_history = track_data["history"]
+            
+            if track_embedding is not None:
+                similarity = cosine_similarity(track_embedding, target_embedding)
+                position_consistency = 1 / (1 + np.linalg.norm(np.array(target_position) - np.array(np.mean(track_history, axis=0) if track_history else track_position))) if track_position is not None else 0
+                
+                score = ((EMBEDDING_WEIGHT * similarity +
+                            POSITION_WEIGHT * position_consistency) / TOTAL_WEIGHT)
+                
+                if track_data["id"] == face_id:
+                    score *= (1 + STICKINESS_FACTOR)
+                    
+                if score > best_match_score:
+                    best_match_score = score
+                    best_match_index = track_id
+    else:
+        # Define weights if we took fast path, so the update logic below works
+        total = modules.globals.old_embedding_weight + modules.globals.new_embedding_weight
+        OLD_WEIGHT = modules.globals.old_embedding_weight / total
+        NEW_WEIGHT = modules.globals.new_embedding_weight / total
 
     matched_track_id = -1
     use_pseudo_face = False
@@ -481,15 +511,29 @@ def _process_face_tracking_both(
         matched_track_id = best_match_index
         
         # Update Track
+        # Update Track
         tracked_face = tracked_faces[matched_track_id]
-        tracked_face["embedding"] = OLD_WEIGHT * tracked_face["embedding"] + NEW_WEIGHT * target_embedding
+        
+        # Only do heavy embedding updates if we didn't use the fast path (score 100 means fast path)
+        if best_match_score != 100.0:
+             tracked_face["embedding"] = OLD_WEIGHT * tracked_face["embedding"] + NEW_WEIGHT * target_embedding
+        
+        # Always update position and bbox
         avg_position = np.mean(tracked_face["history"], axis=0) if tracked_face["history"] else tracked_face["position"]
         if avg_position is not None:
             tracked_face["position"] = np.array(avg_position) * 0.8 + np.array(target_position) * 0.2
         else:
             tracked_face["position"] = np.array(target_position)
+            
+        tracked_face["bbox"] = target_face.bbox # SAVE THE BOX FOR IOU
         tracked_face["id"] = face_id
         tracked_face["history"].append(target_position)
+        
+        # Sync Globals
+        if matched_track_id == 0:
+            first_face_bbox = target_face.bbox
+        else:
+            second_face_bbox = target_face.bbox
         
         # Update Scores Global
         if matched_track_id == 0:
@@ -1241,6 +1285,7 @@ def reset_face_tracking():
     """
     global first_face_embedding, second_face_embedding
     global first_face_position, second_face_position
+    global first_face_bbox, second_face_bbox
     global first_face_id, second_face_id
     global first_face_lost_count, second_face_lost_count
     global face_position_history
@@ -1257,10 +1302,11 @@ def reset_face_tracking():
     second_face_embedding = None
     first_face_position = None
     second_face_position = None
+    first_face_bbox = None
+    second_face_bbox = None
     first_face_id = None
     second_face_id = None
     first_face_lost_count = 0
-    second_face_lost_count = 0
     face_position_history.clear()
     
     modules.globals.target_face1_score = 0.00
@@ -1711,6 +1757,30 @@ def get_two_faces(frame: Frame) -> List[Face]:
         sorted_faces = sorted(faces, key=lambda x: x.bbox[0]) # Sort the faces from left to right
         return sorted_faces[:2]  # Return up to two faces, leftmost and rightmost
     return [] # If no faces were detected, return an empty list
+
+def calculate_iou(boxA, boxB):
+    """
+    Calculates Intersection over Union (IOU) between two bounding boxes.
+    """
+    # determine the (x, y)-coordinates of the intersection rectangle
+    xA = max(boxA[0], boxB[0])
+    yA = max(boxA[1], boxB[1])
+    xB = min(boxA[2], boxB[2])
+    yB = min(boxA[3], boxB[3])
+
+    # compute the area of intersection rectangle
+    interArea = max(0, xB - xA + 1) * max(0, yB - yA + 1)
+
+    # compute the area of both the prediction and ground-truth rectangles
+    boxAArea = (boxA[2] - boxA[0] + 1) * (boxA[3] - boxA[1] + 1)
+    boxBArea = (boxB[2] - boxB[0] + 1) * (boxB[3] - boxB[1] + 1)
+
+    # compute the intersection over union by taking the intersection
+    # area and dividing it by the sum of prediction + ground-truth
+    # areas - the interesection area
+    iou = interArea / float(boxAArea + boxBArea - interArea)
+
+    return iou
 
 def estimate_head_rotation(face: Face) -> float:
     """
