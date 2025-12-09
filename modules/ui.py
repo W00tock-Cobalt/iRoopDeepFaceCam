@@ -246,20 +246,20 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
     def update_mask_target(value):
         modules.globals.mask_target_option = value
 
-    # Label "Mask:"
-    mask_target_label = ctk.CTkLabel(ui_container, text='Mask:', font=("Arial", 12))
-    mask_target_label.place(relx=0.35, rely=y_start + 6.4*y_increment, relwidth=0.05)
+    # # Label "Mask:"
+    # mask_target_label = ctk.CTkLabel(ui_container, text='Mask:', font=("Arial", 12))
+    # mask_target_label.place(relx=0.35, rely=y_start + 6.4*y_increment, relwidth=0.05)
 
-    # Dropdown [Both, Left, Right]
-    mask_target_var = ctk.StringVar(value="Both")
-    mask_target_dropdown = ctk.CTkOptionMenu(ui_container, 
-                                          values=["Both", "Left", "Right"],
-                                          variable=mask_target_var,
-                                          command=update_mask_target,
-                                          width=60,
-                                          height=22,
-                                          font=("Arial", 11))
-    mask_target_dropdown.place(relx=0.42, rely=y_start + 6.4*y_increment + 0.002, relwidth=0.10)
+    # # Dropdown [Both, Left, Right]
+    # mask_target_var = ctk.StringVar(value="Both")
+    # mask_target_dropdown = ctk.CTkOptionMenu(ui_container, 
+    #                                       values=["Both", "Left", "Right"],
+    #                                       variable=mask_target_var,
+    #                                       command=update_mask_target,
+    #                                       width=60,
+    #                                       height=22,
+    #                                       font=("Arial", 11))
+    # mask_target_dropdown.place(relx=0.42, rely=y_start + 6.4*y_increment + 0.002, relwidth=0.10)
 
     flip_faces_value = ctk.BooleanVar(value=modules.globals.flip_faces)
     flip_faces_switch = ctk.CTkSwitch(ui_container, text='Flip First Two Source Faces', variable=flip_faces_value, cursor='hand2',
@@ -653,6 +653,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         old_embedding_size_dropdown.configure(state="disabled")
         new_embedding_size_dropdown.configure(state="disabled")
 
+    setup_hotkeys(root) # Register Hotkeys for Main Window
     return root
 
 def select_camera(*args):
@@ -913,7 +914,9 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
             switch_frame.configure(height=original_height)  # Use 'configure' instead of 'config'
         is_switch_frame_visible = not is_switch_frame_visible
 
-    preview.bind("<Double-Button-1>", on_double_click)  # Bind double-click event <button class="citation-flag" data-index="2">
+    preview.bind("<Double-Button-1>", on_double_click)  # Bind double-click event
+    
+    setup_hotkeys(preview) # Register Hotkeys for Preview Window
 
     return preview
 
@@ -1558,3 +1561,49 @@ def face_rot_size(*args):
 
     size = rot_range_var.get()
     modules.globals.face_rot_range = int(size)
+
+# --- HOTKEY HANDLERS ---
+
+def setup_hotkeys(window):
+    # a - auto face tracking
+    window.bind('a', lambda e: toggle_face_tracking_hotkey())
+    # t - reset tracking
+    window.bind('t', lambda e: reset_face_tracking_hotkey())
+    # m - mouth mask global
+    window.bind('m', lambda e: toggle_mouth_mask_global_hotkey())
+    
+    # 1-9, 0 for individual faces
+    window.bind('1', lambda e: toggle_mouth_mask_face_hotkey(0))
+    window.bind('2', lambda e: toggle_mouth_mask_face_hotkey(1))
+    window.bind('3', lambda e: toggle_mouth_mask_face_hotkey(2))
+    window.bind('4', lambda e: toggle_mouth_mask_face_hotkey(3))
+    window.bind('5', lambda e: toggle_mouth_mask_face_hotkey(4))
+    window.bind('6', lambda e: toggle_mouth_mask_face_hotkey(5))
+    window.bind('7', lambda e: toggle_mouth_mask_face_hotkey(6))
+    window.bind('8', lambda e: toggle_mouth_mask_face_hotkey(7))
+    window.bind('9', lambda e: toggle_mouth_mask_face_hotkey(8))
+    window.bind('0', lambda e: toggle_mouth_mask_face_hotkey(9))
+
+def toggle_face_tracking_hotkey():
+    if 'face_tracking_value' in globals():
+        val = not face_tracking_value.get()
+        face_tracking_value.set(val)
+        modules.globals.face_tracking = val
+        face_tracking(None) # Update UI state
+        update_status(f"Auto Face Tracking: {'On' if val else 'Off'}")
+
+def reset_face_tracking_hotkey():
+    clear_face_tracking_data()
+    update_status("Face Tracking Reset")
+
+def toggle_mouth_mask_global_hotkey():
+    if hasattr(modules.globals, 'mouth_mask_var'):
+        val = not modules.globals.mouth_mask_var.get()
+        modules.globals.mouth_mask_var.set(val)
+        modules.globals.mouth_mask = val
+        update_status(f"Mouth Mask: {'On' if val else 'Off'}")
+
+def toggle_mouth_mask_face_hotkey(index):
+    modules.globals.mouth_mask_enabled_faces[index] = not modules.globals.mouth_mask_enabled_faces[index]
+    state = "On" if modules.globals.mouth_mask_enabled_faces[index] else "Off"
+    update_status(f"Mouth Mask Face {index + 1}: {state}")    

@@ -102,3 +102,4 @@ rotation_check_interval = 5
 detection_frequency = 1 # Default to 3 (Balanced speed/accuracy)
 
 mask_target_option = "Both" # Add this line
+mouth_mask_enabled_faces = [True] * 10 # Initialize 10 faces to True

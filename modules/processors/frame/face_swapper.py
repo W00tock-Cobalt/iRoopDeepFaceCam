@@ -210,6 +210,11 @@ def _compute_mouth_masks(target_faces: List[Face], frame: Frame) -> List[Tuple[n
                     process_this_face = False
                 elif option == "Right" and i == 0: # Skip Left Face
                     process_this_face = False
+            
+            # Check individual face toggle (Hotkeys 1-0)
+            if i < len(modules.globals.mouth_mask_enabled_faces):
+                if not modules.globals.mouth_mask_enabled_faces[i]:
+                    process_this_face = False
 
             if process_this_face:
                 face_mask = create_face_mask(face, frame)
