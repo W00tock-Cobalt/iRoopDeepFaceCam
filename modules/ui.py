@@ -1,3 +1,4 @@
+import threading
 import modules.server
 import os
 import webbrowser
@@ -11,12 +12,151 @@ import modules.metadata
 from modules.face_analyser import get_one_face, get_one_face_left, get_one_face_right,get_many_faces
 from modules.capturer import get_video_frame, get_video_frame_total
 from modules.processors.frame.core import get_frame_processors_modules
-
+from modules.processors.frame.face_swapper import estimate_head_rotation
 
 from modules.utilities import is_image, is_video, resolve_relative_path, has_image_extension
 import numpy as np
 import time
 
+# Global reference to the worker so the dropdown can find it
+worker = None 
+
+class LiveSwapWorker:
+    def __init__(self):
+        self.stopped = False
+        self.latest_frame = None
+        self.lock = threading.Lock()
+        self.camera = None
+        self.frame_processors = []
+        self.source_images = []
+        
+        # Resolution Variables
+        self.camera_index = 0
+        self.change_res_flag = False
+        self.new_width = 640
+        self.new_height = 480
+        
+        # Auto-Rotation Variables
+        self.rotation_check_counter = 0
+
+    def start(self, camera_index):
+        self.camera_index = camera_index
+        
+        # 1. Load Processors (From your code)
+        self.frame_processors = get_frame_processors_modules(modules.globals.frame_processors)
+        
+        # 2. Reset Tracking (From your code)
+        if modules.globals.face_tracking:
+            for processor in self.frame_processors:
+                if hasattr(processor, 'reset_face_tracking'):
+                    processor.reset_face_tracking()
+                    
+        # 3. Load Source Images (From your code)
+        if modules.globals.source_path:
+            source_image = cv2.imread(modules.globals.source_path)
+            faces = get_many_faces(source_image)
+            if faces:
+                self.source_images = sorted(faces, key=lambda face: face.bbox[0])[:20]
+        
+        # 4. Extract Embeddings (From your code)
+        for frame_processor in self.frame_processors:
+             if hasattr(frame_processor, 'extract_face_embedding') and self.source_images:
+                source_embeddings = []
+                for face in self.source_images:
+                     source_embeddings.append(frame_processor.extract_face_embedding(face))
+                modules.globals.source_face_left_embedding = source_embeddings
+
+        threading.Thread(target=self.process_loop, daemon=True).start()
+
+    def set_resolution(self, width, height):
+        self.new_width = width
+        self.new_height = height
+        self.change_res_flag = True
+
+    def process_loop(self):
+        # Initial Setup
+        self.camera = cv2.VideoCapture(self.camera_index)
+        self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, modules.ui.PREVIEW_DEFAULT_WIDTH)
+        self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, modules.ui.PREVIEW_DEFAULT_HEIGHT)
+        self.camera.set(cv2.CAP_PROP_FPS, 60)
+
+        while not self.stopped:
+            # --- HANDLE RESOLUTION CHANGE ---
+            if self.change_res_flag:
+                if self.camera.isOpened(): self.camera.release()
+                self.camera = cv2.VideoCapture(self.camera_index)
+                self.camera.set(cv2.CAP_PROP_FRAME_WIDTH, self.new_width)
+                self.camera.set(cv2.CAP_PROP_FRAME_HEIGHT, self.new_height)
+                self.camera.set(cv2.CAP_PROP_FPS, 60)
+                self.change_res_flag = False
+
+            if self.camera.isOpened(): self.camera.grab() # Latency hack
+
+            ret, current_frame = self.camera.read()
+            if not ret:
+                time.sleep(0.01)
+                continue
+
+            # Flip Logic
+            if modules.globals.flip_x:
+                current_frame = cv2.flip(current_frame, 1)
+            if modules.globals.flip_y:
+                current_frame = cv2.flip(current_frame, 0)
+
+            # --- YOUR AUTO ROTATION LOGIC (Moved to Thread) ---
+            if modules.globals.auto_rotate_value and self.rotation_check_counter % modules.globals.rotation_check_interval == 0:
+                rotation_check_faces = get_many_faces(current_frame)
+                new_rot = 0
+                found_rotation = False
+
+                if rotation_check_faces:
+                    main_face = max(rotation_check_faces, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
+                    angle = estimate_head_rotation(main_face)
+                    if angle > 60: new_rot = -90 
+                    elif angle < -60: new_rot = 90
+                    found_rotation = True
+                
+                if not found_rotation:
+                    frame_180 = cv2.rotate(current_frame, cv2.ROTATE_180)
+                    faces_180 = get_many_faces(frame_180)
+                    if faces_180:
+                        new_rot = 180
+                        found_rotation = True
+
+                if found_rotation:
+                    if modules.globals.face_rot_range != new_rot:
+                        modules.globals.face_rot_range = new_rot
+                        # Note: We update the logic variable here. 
+                        # Visual dropdown updates happen in the UI thread loop to avoid crashes.
+
+            self.rotation_check_counter += 1
+            # --------------------------------------------------
+
+            # --- FACE SWAP PROCESSING ---
+            processed_frame = current_frame.copy()
+            if self.source_images:
+                try:
+                    for processor in self.frame_processors:
+                        processed_frame = processor.process_frame(self.source_images, processed_frame)
+                except Exception:
+                    pass
+
+            # Update Latest Frame
+            with self.lock:
+                self.latest_frame = processed_frame
+
+        if self.camera:
+            self.camera.release()
+
+    def get_frame(self):
+        with self.lock:
+            if self.latest_frame is not None:
+                return self.latest_frame.copy()
+            return None
+
+    def stop(self):
+        self.stopped = True
+        
 global camera
 camera = None
 
@@ -1158,54 +1298,41 @@ def update_preview(frame_number: int = 0) -> None:
 def webcam_preview():
     if modules.globals.source_path is None:
         return
-    global preview_label, PREVIEW, ROOT, camera
-    global first_face_id, second_face_id
-    global first_face_embedding, second_face_embedding
-    global enhancer_switch
+    
+    global preview_label_cam, PREVIEW, ROOT, enhancer_switch, fps_label
+    global worker # Global so update_camera_resolution can find it
+    global target_face1_value, target_face2_value, target_face3_value, target_face4_value, target_face5_value
+    global target_face6_value, target_face7_value, target_face8_value, target_face9_value, target_face10_value
 
-    # --- FACE ENHANCER LOGIC ---
+    # --- FACE ENHANCER LOGIC (From your code) ---
     previous_enhancer_state = modules.globals.fp_ui.get('face_enhancer', False)
     if previous_enhancer_state:
         enhancer_switch.deselect()
         update_tumbler('face_enhancer', False)
     if enhancer_switch:
         enhancer_switch.configure(state="disabled")
-    # ---------------------------
 
-    # Reset face assignments
-    first_face_embedding = None
-    second_face_embedding = None
-    first_face_id = None
-    second_face_id = None
+    # --- RESET GLOBALS (From your code) ---
+    modules.globals.first_face_embedding = None
+    modules.globals.second_face_embedding = None
+    modules.globals.first_face_id = None
+    modules.globals.second_face_id = None
 
-    # Set initial size
+    # --- UI SETUP ---
     PREVIEW_WIDTH = 1100
     PREVIEW_HEIGHT = 670
-    camera_index = modules.globals.camera_index
-    camera = cv2.VideoCapture(camera_index)
-    update_camera_resolution()
-    
-    # Configure preview
     PREVIEW.deiconify()
     PREVIEW.geometry(f"{PREVIEW_WIDTH}x{PREVIEW_HEIGHT}")
     preview_label_cam.configure(width=PREVIEW_WIDTH, height=PREVIEW_HEIGHT)
-    frame_processors = get_frame_processors_modules(modules.globals.frame_processors)
-    
-    if modules.globals.face_tracking:
-        for frame_processor in frame_processors:
-            if hasattr(frame_processor, 'reset_face_tracking'):
-                    frame_processor.reset_face_tracking()
 
-    # Initialize source_images
-    source_images: List[Face] = []
-    if modules.globals.source_path:
-        source_image = cv2.imread(modules.globals.source_path)
-        faces = get_many_faces(source_image)
-        if faces:
-            source_images = sorted(faces, key=lambda face: face.bbox[0])[:20]
-    
-    if not source_images:
+    # --- START THE WORKER ---
+    worker = LiveSwapWorker()
+    worker.start(modules.globals.camera_index)
+
+    # --- CONFIGURE DROPDOWNS (From your code - logic moved here because worker has source_images) ---
+    if not worker.source_images:
         print('No face found in source image')
+        worker.stop()
         if enhancer_switch:
             enhancer_switch.configure(state="normal")
             if previous_enhancer_state:
@@ -1213,150 +1340,80 @@ def webcam_preview():
                 update_tumbler('face_enhancer', True)
         return
     else:
-        num_faces = len(source_images)
+        num_faces = len(worker.source_images)
         dropdown_values = ["-1"] + [str(i) for i in range(num_faces)]
         dropdown2_values = [str(i) for i in range(num_faces)]
         
         modules.globals.face_index_dropdown_preview.configure(values=dropdown_values)
         modules.globals.face2_index_dropdown_preview.configure(values=dropdown2_values)
-        # Reset Face 1 (F1) to Auto (-1)
         modules.globals.face_index_var.set("-1")
         modules.globals.face_index_range = -1
-
-        # Reset Face 2 (F2) to First Face (0)
         modules.globals.face2_index_var.set("0")
         modules.globals.face2_index_range = 0
 
-        for frame_processor in frame_processors:
-             if hasattr(frame_processor, 'extract_face_embedding'):
-                source_embeddings = []
-                for face in source_images:
-                     source_embeddings.append(frame_processor.extract_face_embedding(face))
-                modules.globals.source_face_left_embedding=source_embeddings
-
-    from modules.processors.frame.face_swapper import estimate_head_rotation
-
     frame_count = 0
     start_time = time.time()
-    fps = 0
-    prev_frame = None
-    
-    rotation_check_counter = 0
-    # ROTATION_CHECK_INTERVAL = 5 
 
-    while camera.isOpened():
-        ret, current_frame = camera.read()
-        if not ret:
-            break
-            
-        if modules.globals.flip_x:
-            current_frame = cv2.flip(current_frame, 1)
-        if modules.globals.flip_y:
-            current_frame = cv2.flip(current_frame, 0)
+    # --- UI UPDATE LOOP ---
+    def update_ui_loop():
+        nonlocal frame_count, start_time
 
-        # --- AUTO ROTATION LOGIC ---
-        if modules.globals.auto_rotate_value and rotation_check_counter % modules.globals.rotation_check_interval == 0:
-            # 1. Try detecting faces on the raw frame (Handles 0, 90, -90)
-            rotation_check_faces = get_many_faces(current_frame)
-            
-            new_rot = 0
-            found_rotation = False
-
-            if rotation_check_faces:
-                # Found face in normal orientation
-                main_face = max(rotation_check_faces, key=lambda f: (f.bbox[2]-f.bbox[0]) * (f.bbox[3]-f.bbox[1]))
-                angle = estimate_head_rotation(main_face)
-                
-                # Check Upside Down angle (rarely detected here, but possible)
-                # if angle > 150 or angle < -150:
-                #     new_rot = 180
-                # el
-                if angle > 60:
-                    new_rot = -90 
-                elif angle < -60:
-                    new_rot = 90
-                
-                found_rotation = True
-            
-            # 2. If no face found, check 180 degree rotation
-            # The detector usually fails on upside down faces, so we manually flip and check.
-            if not found_rotation:
-                frame_180 = cv2.rotate(current_frame, cv2.ROTATE_180)
-                faces_180 = get_many_faces(frame_180)
-                
-                if faces_180:
-                    # If we found a face here, it means the input was upside down
-                    new_rot = 180
-                    found_rotation = True
-
-            # Apply the rotation if a valid face/orientation was found
-            if found_rotation:
-                if modules.globals.face_rot_range != new_rot:
-                    modules.globals.face_rot_range = new_rot
-                    if modules.globals.rot_range_var:
-                        modules.globals.rot_range_var.set(str(new_rot))
-                    if modules.globals.rot_range_dropdown_preview:
-                         modules.globals.rot_range_dropdown_preview.set(str(new_rot))
-        
-        rotation_check_counter += 1
-        # ---------------------------
-
-        if prev_frame is None:
-            prev_frame = current_frame.copy()
-            continue
-
-        processed_frame = prev_frame.copy()
-
-        for frame_processor in frame_processors:
-            processed_frame = frame_processor.process_frame(source_images, processed_frame)
-        
-        prev_frame = current_frame.copy()
-
-        # FPS
-        frame_count += 1
-        current_time = time.time()
-        elapsed_time = current_time - start_time
-        if elapsed_time > 1:
-            fps = frame_count / elapsed_time
-            frame_count = 0
-            start_time = current_time
-        
-        fps_label.configure(text=f'FPS: {fps:.2f}')
-        
-        # UI Updates
-        target_face1_value.configure(text=f': {modules.globals.target_face1_score:.2f}')
-        target_face2_value.configure(text=f': {modules.globals.target_face2_score:.2f}')
-        target_face3_value.configure(text=f': {modules.globals.target_face3_score:.2f}')
-        target_face4_value.configure(text=f': {modules.globals.target_face4_score:.2f}')
-        target_face5_value.configure(text=f': {modules.globals.target_face5_score:.2f}')
-        target_face6_value.configure(text=f': {modules.globals.target_face6_score:.2f}')
-        target_face7_value.configure(text=f': {modules.globals.target_face7_score:.2f}')
-        target_face8_value.configure(text=f': {modules.globals.target_face8_score:.2f}')
-        target_face9_value.configure(text=f': {modules.globals.target_face9_score:.2f}')
-        target_face10_value.configure(text=f': {modules.globals.target_face10_score:.2f}')
-
-        current_width = PREVIEW.winfo_width()
-        current_height = PREVIEW.winfo_height()
-        
-        display_frame = fit_image_to_preview(processed_frame, current_width, current_height)
-        image = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
-        image = Image.fromarray(image)
-        image = ctk.CTkImage(image, size=(current_width, current_height))
-        
-        preview_label_cam.configure(image=image, width=current_width, height=current_height)
-        ROOT.update()
-        
+        # 1. Handle Window Close
         if PREVIEW.state() == 'withdrawn':
-            break
+            worker.stop()
+            if enhancer_switch:
+                enhancer_switch.configure(state="normal")
+                if previous_enhancer_state:
+                    enhancer_switch.select()
+                    update_tumbler('face_enhancer', True)
+            return
 
-    camera.release()
-    PREVIEW.withdraw()
+        # 2. Get Frame from Worker
+        frame = worker.get_frame()
 
-    if enhancer_switch:
-        enhancer_switch.configure(state="normal")
-        if previous_enhancer_state:
-            enhancer_switch.select()
-            update_tumbler('face_enhancer', True)
+        if frame is not None:
+            # 3. FPS Calculation
+            frame_count += 1
+            current_time = time.time()
+            if current_time - start_time > 1:
+                fps = frame_count / (current_time - start_time)
+                fps_label.configure(text=f'FPS: {fps:.2f}')
+                frame_count = 0
+                start_time = current_time
+            
+            # 4. Update Face Tracking Labels (From your code)
+            target_face1_value.configure(text=f': {modules.globals.target_face1_score:.2f}')
+            target_face2_value.configure(text=f': {modules.globals.target_face2_score:.2f}')
+            target_face3_value.configure(text=f': {modules.globals.target_face3_score:.2f}')
+            target_face4_value.configure(text=f': {modules.globals.target_face4_score:.2f}')
+            target_face5_value.configure(text=f': {modules.globals.target_face5_score:.2f}')
+            target_face6_value.configure(text=f': {modules.globals.target_face6_score:.2f}')
+            target_face7_value.configure(text=f': {modules.globals.target_face7_score:.2f}')
+            target_face8_value.configure(text=f': {modules.globals.target_face8_score:.2f}')
+            target_face9_value.configure(text=f': {modules.globals.target_face9_score:.2f}')
+            target_face10_value.configure(text=f': {modules.globals.target_face10_score:.2f}')
+
+            # 5. Sync Auto-Rotation Dropdowns
+            # If the worker changed the rotation logic, update the UI dropdown to match
+            if modules.globals.rot_range_var.get() != str(modules.globals.face_rot_range):
+                 modules.globals.rot_range_var.set(str(modules.globals.face_rot_range))
+                 if modules.globals.rot_range_dropdown_preview:
+                     modules.globals.rot_range_dropdown_preview.set(str(modules.globals.face_rot_range))
+
+            # 6. Display Image
+            current_width = PREVIEW.winfo_width()
+            current_height = PREVIEW.winfo_height()
+            
+            display_frame = fit_image_to_preview(frame, current_width, current_height)
+            image_rgb = cv2.cvtColor(display_frame, cv2.COLOR_BGR2RGB)
+            image_pil = Image.fromarray(image_rgb)
+            ctk_img = ctk.CTkImage(image_pil, size=(current_width, current_height))
+            preview_label_cam.configure(image=ctk_img)
+
+        # 7. Schedule next update
+        PREVIEW.after(10, update_ui_loop)
+
+    update_ui_loop()
 
 def fit_image_to_preview(image, preview_width, preview_height):
     h, w = image.shape[:2]
@@ -1390,27 +1447,30 @@ def update_preview_size(*args):
     PREVIEW_DEFAULT_WIDTH = int(size[0])
     PREVIEW_DEFAULT_HEIGHT = int(size[1])
     
-    if camera is not None and camera.isOpened():
-        update_camera_resolution()
+    
+    update_camera_resolution()
     
     # if PREVIEW.state() == 'normal':
     #     update_preview()
 
 def update_camera_resolution():
-    global camera, PREVIEW_DEFAULT_WIDTH, PREVIEW_DEFAULT_HEIGHT
-    if camera is not None and camera.isOpened():
-        camera.set(cv2.CAP_PROP_FRAME_WIDTH, PREVIEW_DEFAULT_WIDTH)
-        camera.set(cv2.CAP_PROP_FRAME_HEIGHT, PREVIEW_DEFAULT_HEIGHT)
-        camera.set(cv2.CAP_PROP_FPS, 60)  # You may want to make FPS configurable as well
+    global camera, worker, PREVIEW_DEFAULT_WIDTH, PREVIEW_DEFAULT_HEIGHT
     
-        # set camera with new resolution
+    # 1. Threaded Mode (Fast)
+    # If the worker exists and is running, tell IT to change resolution
+    if 'worker' in globals() and worker is not None and not worker.stopped:
+        worker.set_resolution(PREVIEW_DEFAULT_WIDTH, PREVIEW_DEFAULT_HEIGHT)
+        return
 
+    # 2. Legacy Mode (Old sequential way)
+    # Only runs if worker is NOT active
+    if camera is not None and camera.isOpened():
         camera_index = modules.globals.camera_index
         camera.release()
         camera = cv2.VideoCapture(camera_index) 
         camera.set(cv2.CAP_PROP_FRAME_WIDTH, PREVIEW_DEFAULT_WIDTH)
         camera.set(cv2.CAP_PROP_FRAME_HEIGHT, PREVIEW_DEFAULT_HEIGHT)
-        camera.set(cv2.CAP_PROP_FPS, 60)  # You may want to make FPS configurable as well
+        camera.set(cv2.CAP_PROP_FPS, 60)
 
 def both_faces(*args):
     size = both_faces_var.get()
