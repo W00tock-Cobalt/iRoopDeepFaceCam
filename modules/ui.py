@@ -511,7 +511,7 @@ def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.C
         if hasattr(modules.globals, 'mouth_mask_switch_preview'):
             modules.globals.mouth_mask_switch_preview.select() if is_mouthmask else modules.globals.mouth_mask_switch_preview.deselect()
 
-    mouth_mask_switch = ctk.CTkSwitch(outline_frame, text='Mouth Mask | Feather, Padding, Top ->', 
+    mouth_mask_switch = ctk.CTkSwitch(outline_frame, text='Mouth Mask (M) | Feather, Padding, Top ->', 
                                       variable=modules.globals.mouth_mask_var, cursor='hand2',
                                       command=toggle_mouthmask)
     mouth_mask_switch.place(relx=0.02, rely=0.5, relwidth=0.6, relheight=0.5, anchor="w")
@@ -860,13 +860,14 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
     preview.protocol('WM_DELETE_WINDOW', lambda: toggle_preview_cam())
     preview.resizable(width=True, height=True)
 
-    # Create a frame for the switches
+    # Create a frame for the switches (Main Toolbar Container)
     switch_frame = ctk.CTkFrame(preview)
     switch_frame.pack(fill='x', padx=10, pady=5)
 
-    # Store the original height of the switch_frame
-    switch_frame.update()  # Ensure the frame has been rendered to get its height
-    original_height = switch_frame.winfo_height()
+    # 1. Create a sub-frame for the buttons (Top Row)
+    # We use a transparent frame to hold the buttons so they stay on one line
+    button_row = ctk.CTkFrame(switch_frame, fg_color="transparent")
+    button_row.pack(fill='x', side='top')
 
     # Add the "Stay on Top" switch
     def toggle_topmost():
@@ -876,12 +877,10 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
             preview.lift()  # Bring window to front
 
     topmost_var = ctk.BooleanVar(value=False)
-    topmost_switch = ctk.CTkSwitch(switch_frame, text='Stay on Top', variable=topmost_var, cursor='hand2',
+    # NOTE: Parent changed to button_row
+    topmost_switch = ctk.CTkSwitch(button_row, text='Stay on Top', variable=topmost_var, cursor='hand2',
                                    command=toggle_topmost)
     topmost_switch.pack(side='left', padx=5, pady=5)
-
-    # Initially set the window to stay on top
-    # preview.attributes('-topmost', True)
 
     # Add the "Mouth Mask" switch
     def toggle_mouthmask():
@@ -890,12 +889,13 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
         if hasattr(modules.globals, 'mouth_mask_switch_root'):
             modules.globals.mouth_mask_switch_preview.select() if is_mouthmask else modules.globals.mouth_mask_switch_preview.deselect()
 
-    mouth_mask_switch_preview = ctk.CTkSwitch(switch_frame, text='Mouth Mask', 
+    # NOTE: Parent changed to button_row
+    mouth_mask_switch_preview = ctk.CTkSwitch(button_row, text='Mouth Mask', 
                                               variable=modules.globals.mouth_mask_var, cursor='hand2',
                                               command=toggle_mouthmask)
     mouth_mask_switch_preview.pack(side='left', padx=5, pady=5)
 
-    # Store the switch in modules.globals for access from create_root
+    # Store the switch in modules.globals
     modules.globals.mouth_mask_switch_preview = mouth_mask_switch_preview
 
     # Add the "Flip X" switch
@@ -905,12 +905,12 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
         if hasattr(modules.globals, 'flipX_switch_preview'):
             modules.globals.flipX_switch_preview.select() if is_flipX else modules.globals.flipX_switch_preview.deselect()
 
-    flipX_switch = ctk.CTkSwitch(switch_frame, text=' Flip X', 
+    # NOTE: Parent changed to button_row
+    flipX_switch = ctk.CTkSwitch(button_row, text=' Flip X', 
                                  variable=modules.globals.flipX_var, cursor='hand2',
                                  command=toggle_flipX)
     flipX_switch.pack(side='left', padx=5, pady=5)
 
-    # Store the switch in modules.globals for access from create_root
     modules.globals.flipX_switch_preview = flipX_switch
 
     # Add the "Flip Y" switch
@@ -920,12 +920,12 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
         if hasattr(modules.globals, 'flipY_switch_preview'):
             modules.globals.flipY_switch_preview.select() if is_flipY else modules.globals.flipY_switch_preview.deselect()
 
-    flipY_switch = ctk.CTkSwitch(switch_frame, text=' Flip Y', 
+    # NOTE: Parent changed to button_row
+    flipY_switch = ctk.CTkSwitch(button_row, text=' Flip Y', 
                                  variable=modules.globals.flipY_var, cursor='hand2',
                                  command=toggle_flipY)
     flipY_switch.pack(side='left', padx=5, pady=5)
 
-    # Store the switch in modules.globals for access from create_root
     modules.globals.flipY_switch_preview = flipY_switch
 
     # Function to handle rotation range changes
@@ -934,19 +934,19 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
         modules.globals.rot_range_dropdown_preview.set(size)
 
     # Create rotation range label
-    face_rot_label = ctk.CTkLabel(switch_frame, text=" | Rot Range ", font=("Arial", 16))
+    # NOTE: Parent changed to button_row
+    face_rot_label = ctk.CTkLabel(button_row, text=" | Rot Range ", font=("Arial", 16))
     face_rot_label.pack(side='left', padx=5, pady=5)
 
-    # --- NEW AUTO ROTATE SWITCH (PREVIEW) ---
+    # --- AUTO ROTATE SWITCH (PREVIEW) ---
     def toggle_auto_rotate_preview():
         is_auto = modules.globals.auto_rotate_var.get()
         modules.globals.auto_rotate_value = is_auto
-        
-        # Sync Main Switch
         if modules.globals.auto_rotate_switch_main:
             modules.globals.auto_rotate_switch_main.select() if is_auto else modules.globals.auto_rotate_switch_main.deselect()
     
-    auto_rotate_switch_prev = ctk.CTkSwitch(switch_frame, text='Auto', 
+    # NOTE: Parent changed to button_row
+    auto_rotate_switch_prev = ctk.CTkSwitch(button_row, text='Auto', 
                                            variable=modules.globals.auto_rotate_var,
                                            command=toggle_auto_rotate_preview,
                                            width=50)
@@ -955,89 +955,89 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
     modules.globals.auto_rotate_switch_preview = auto_rotate_switch_prev
 
     # Initialize and create rotation range dropdown
-    rot_range_dropdown_preview = ctk.CTkOptionMenu(switch_frame, values=["0", "90", "180", "-90"],
+    # NOTE: Parent changed to button_row
+    rot_range_dropdown_preview = ctk.CTkOptionMenu(button_row, values=["0", "90", "180", "-90"],
                                                    variable=modules.globals.rot_range_var,
                                                    command=update_rotation_range,width=10)
     rot_range_dropdown_preview.pack(side='left', padx=5, pady=5)
 
-    # Store the switch in modules.globals for access from create_preview
     modules.globals.rot_range_dropdown_preview = rot_range_dropdown_preview 
 
-    modules.globals.face_index_range = -1  # Initialize to -1
-    modules.globals.face_index_var = ctk.StringVar(value="-1") # Initialize the option menu variable
+    modules.globals.face_index_range = -1  
+    modules.globals.face_index_var = ctk.StringVar(value="-1")
 
     # Function to handle face range changes
     def update_face_index(size):
         modules.globals.face_index_range = int(size)
         modules.globals.face_index_dropdown_preview.set(size)
-        # modules.globals.flip_faces = False
-        # flip_faces_value.set(False)
-        # modules.globals.both_faces = False
-        # both_faces_var.set(False)
 
     # Create face index range label
-    face_rot_index = ctk.CTkLabel(switch_frame, text=" | F1 ", font=("Arial", 16))
+    # NOTE: Parent changed to button_row
+    face_rot_index = ctk.CTkLabel(button_row, text=" | F1 ", font=("Arial", 16))
     face_rot_index.pack(side='left', padx=5, pady=5)
 
     # Initialize and create rotation range dropdown
-    face_index_dropdown_preview = ctk.CTkOptionMenu(switch_frame, values=["-1","0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+    # NOTE: Parent changed to button_row
+    face_index_dropdown_preview = ctk.CTkOptionMenu(button_row, values=["-1","0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
                                                     variable=modules.globals.face_index_var,
                                                     command=update_face_index,width=10)
     face_index_dropdown_preview.pack(side='left', padx=5, pady=5)
 
-    # Store the switch in modules.globals for access from create_preview
     modules.globals.face_index_dropdown_preview = face_index_dropdown_preview 
 
-    modules.globals.face2_index_range = 0  # Initialize to -1
-    modules.globals.face2_index_var = ctk.StringVar(value="0") # Initialize the option menu variable
+    modules.globals.face2_index_range = 0  
+    modules.globals.face2_index_var = ctk.StringVar(value="0")
 
     # Function to handle face range changes
     def update_face2_index(size):
         modules.globals.face2_index_range = int(size)
         modules.globals.face2_index_dropdown_preview.set(size)
 
-
     # Create face index range label
-    face2_rot_index = ctk.CTkLabel(switch_frame, text=" | F2 ", font=("Arial", 16))
+    # NOTE: Parent changed to button_row
+    face2_rot_index = ctk.CTkLabel(button_row, text=" | F2 ", font=("Arial", 16))
     face2_rot_index.pack(side='left', padx=5, pady=5)
 
     # Initialize and create rotation range dropdown
-    # Set initial state based on modules.globals.both_faces
     f2_state = "normal" if modules.globals.both_faces else "disabled"
-    face2_index_dropdown_preview = ctk.CTkOptionMenu(switch_frame, values=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
+    # NOTE: Parent changed to button_row
+    face2_index_dropdown_preview = ctk.CTkOptionMenu(button_row, values=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
                                                     variable=modules.globals.face2_index_var,
                                                     command=update_face2_index,width=10,
                                                     state=f2_state)
     face2_index_dropdown_preview.pack(side='left', padx=5, pady=5)
 
-    # Store the switch in modules.globals for access from create_preview
     modules.globals.face2_index_dropdown_preview = face2_index_dropdown_preview 
 
-
-    preview_label_cam = ctk.CTkLabel(preview, text=None)
-    preview_label_cam.pack(fill='y', expand=True)
-
-    # Double-click event handling
-    is_switch_frame_visible = True
-
+    # Forehead logic
     def update_forehead_index(size):
         new_float_value = float(size)
         modules.globals.face_forehead_var = new_float_value
 
-    face_forehead_index = ctk.CTkLabel(switch_frame, text=" | Forehead ", font=("Arial", 16))
+    # NOTE: Parent changed to button_row
+    face_forehead_index = ctk.CTkLabel(button_row, text=" | Forehead ", font=("Arial", 16))
     face_forehead_index.pack(side='left', padx=5, pady=5)
 
     # Initialize and create rotation range dropdown
     face_forehead_size_var = ctk.StringVar(value="0.1")
-    face_forehead_index_dropdown_preview = ctk.CTkOptionMenu(switch_frame, values=["0.1","0.2", "0.3", "0.4", "0.5"],
+    # NOTE: Parent changed to button_row
+    face_forehead_index_dropdown_preview = ctk.CTkOptionMenu(button_row, values=["0.1","0.2", "0.3", "0.4", "0.5"],
                                                     variable=face_forehead_size_var,
                                                     command=update_forehead_index,width=10)
     face_forehead_index_dropdown_preview.pack(side='left', padx=5, pady=5)
 
-
+    # --- 2. Create the Hotkey Label (Bottom Row) ---
+    # This places the text exactly where you drew the red circle
+    hotkey_text = "Hotkeys: Auto Track (A) | Reset Track (T) | Mouth Mask (M) | Mask Face 1-10 (1-0)"
+    hotkey_index = ctk.CTkLabel(switch_frame, text=hotkey_text, font=("Arial", 12), text_color="gray")
+    hotkey_index.pack(side='top', fill='x', padx=10, pady=(0, 5), anchor='w')
 
     preview_label_cam = ctk.CTkLabel(preview, text=None)
     preview_label_cam.pack(fill='y', expand=True)
+
+    # Store the original height of the switch_frame
+    switch_frame.update()  # Ensure the frame has been rendered to get its height
+    original_height = switch_frame.winfo_height()
 
     # Double-click event handling
     is_switch_frame_visible = True
@@ -1045,13 +1045,13 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
     def on_double_click(event):
         nonlocal is_switch_frame_visible
         if is_switch_frame_visible:
-            # Hide the switch_frame by setting its height to 0
-            switch_frame.pack_propagate(False)  # Allow manual height adjustment
-            switch_frame.configure(height=0)  # Use 'configure' instead of 'config'
+            # Hide the switch_frame
+            switch_frame.pack_propagate(False)
+            switch_frame.configure(height=0)
         else:
-            # Restore the switch_frame to its original height
-            switch_frame.pack_propagate(True)  # Restore automatic height adjustment
-            switch_frame.configure(height=original_height)  # Use 'configure' instead of 'config'
+            # Restore the switch_frame
+            switch_frame.pack_propagate(True)
+            switch_frame.configure(height=original_height)
         is_switch_frame_visible = not is_switch_frame_visible
 
     preview.bind("<Double-Button-1>", on_double_click)  # Bind double-click event
@@ -1059,7 +1059,6 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
     setup_hotkeys(preview) # Register Hotkeys for Preview Window
 
     return preview
-
 def update_status(text: str) -> None:
     status_label.configure(text=text)
     ROOT.update()
