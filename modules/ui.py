@@ -193,9 +193,30 @@ def init(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.CTk:
     
     ROOT = create_root(start, destroy)
     PREVIEW = create_preview(ROOT)
-    PREVIEW_IMAGE = create_preview_image(ROOT)
+    # PREVIEW_IMAGE = create_preview_image(ROOT) # <--- DELETE or COMMENT OUT THIS LINE
 
     return ROOT
+
+def refresh_preview(*args):
+    """
+    Refreshes the preview window if it is open and NOT in Live Camera mode.
+    """
+    # 1. Check if Preview Window is open
+    if PREVIEW and PREVIEW.state() == 'normal':
+        # 2. Check if Live Worker is running (we don't want to interfere with Live Cam)
+        if worker is not None and not worker.stopped:
+            return
+
+        # 3. Get current frame from slider (default to 0 for images)
+        current_frame = 0
+        if preview_slider:
+            try:
+                current_frame = int(preview_slider.get())
+            except Exception:
+                pass
+        
+        # 4. Trigger the update
+        update_preview(current_frame)
 
 def create_root(start: Callable[[], None], destroy: Callable[[], None]) -> ctk.CTk:
     
@@ -816,22 +837,27 @@ def get_available_cameras():
 def weight_wistribution_size(*args):
     size = weight_distribution_size_var.get()
     modules.globals.weight_distribution_size = float(size)
+    refresh_preview()
 
 def embedding_weight_size(*args):
     size = embedding_weight_size_var.get()
     modules.globals.embedding_weight_size = float(size)
+    refresh_preview()
 
 def position_size(*args):
     size = position_size_var.get()
     modules.globals.position_size = float(size)
+    refresh_preview()
 
 def old_embedding_size(*args):
     size = old_embedding_size_var.get()
     modules.globals.old_embedding_weight  = float(size)
+    refresh_preview()
 
 def new_embedding_size(*args):
     size = new_embedding_size_var.get()
     modules.globals.new_embedding_weight  = float(size)
+    refresh_preview()
 
 def create_preview_image(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
     global preview_label, preview_slider, topmost_switch, mouth_mask_switch_preview
@@ -852,12 +878,13 @@ def create_preview_image(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
 
 def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
     global preview_label_cam, preview_slider, topmost_switch, mouth_mask_switch_preview
+    global preview_label 
 
     preview = ctk.CTkToplevel(parent)
     preview.withdraw()
     preview.title('Double Click hide Toolbar. Always Reset Face Tracking When no Faces, Switching Live Video Stream, or New Faces. Face Index (-1) Auto')
     preview.configure()
-    preview.protocol('WM_DELETE_WINDOW', lambda: toggle_preview_cam())
+    preview.protocol('WM_DELETE_WINDOW', lambda: toggle_preview())
     preview.resizable(width=True, height=True)
 
     # Create a frame for the switches (Main Toolbar Container)
@@ -865,7 +892,6 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
     switch_frame.pack(fill='x', padx=10, pady=5)
 
     # 1. Create a sub-frame for the buttons (Top Row)
-    # We use a transparent frame to hold the buttons so they stay on one line
     button_row = ctk.CTkFrame(switch_frame, fg_color="transparent")
     button_row.pack(fill='x', side='top')
 
@@ -874,10 +900,9 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
         is_topmost = topmost_var.get()
         preview.attributes('-topmost', is_topmost)
         if is_topmost:
-            preview.lift()  # Bring window to front
+            preview.lift() 
 
     topmost_var = ctk.BooleanVar(value=False)
-    # NOTE: Parent changed to button_row
     topmost_switch = ctk.CTkSwitch(button_row, text='Stay on Top', variable=topmost_var, cursor='hand2',
                                    command=toggle_topmost)
     topmost_switch.pack(side='left', padx=5, pady=5)
@@ -887,15 +912,17 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
         is_mouthmask = modules.globals.mouth_mask_var.get()
         modules.globals.mouth_mask = is_mouthmask
         if hasattr(modules.globals, 'mouth_mask_switch_root'):
-            modules.globals.mouth_mask_switch_preview.select() if is_mouthmask else modules.globals.mouth_mask_switch_preview.deselect()
+            # Sync main window switch
+            if modules.globals.mouth_mask_switch_preview.get():
+                modules.globals.mouth_mask_switch_preview.select() 
+            else:
+                modules.globals.mouth_mask_switch_preview.deselect()
+        refresh_preview() # <--- REFRESH ADDED
 
-    # NOTE: Parent changed to button_row
     mouth_mask_switch_preview = ctk.CTkSwitch(button_row, text='Mouth Mask', 
                                               variable=modules.globals.mouth_mask_var, cursor='hand2',
                                               command=toggle_mouthmask)
     mouth_mask_switch_preview.pack(side='left', padx=5, pady=5)
-
-    # Store the switch in modules.globals
     modules.globals.mouth_mask_switch_preview = mouth_mask_switch_preview
 
     # Add the "Flip X" switch
@@ -903,38 +930,34 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
         is_flipX = modules.globals.flipX_var.get()
         modules.globals.flip_x = is_flipX
         if hasattr(modules.globals, 'flipX_switch_preview'):
-            modules.globals.flipX_switch_preview.select() if is_flipX else modules.globals.flipX_switch_preview.deselect()
+            # Sync main window switch logic if needed (usually shared variable handles it)
+            pass
+        refresh_preview() # <--- REFRESH ADDED
 
-    # NOTE: Parent changed to button_row
     flipX_switch = ctk.CTkSwitch(button_row, text=' Flip X', 
                                  variable=modules.globals.flipX_var, cursor='hand2',
                                  command=toggle_flipX)
     flipX_switch.pack(side='left', padx=5, pady=5)
-
     modules.globals.flipX_switch_preview = flipX_switch
 
     # Add the "Flip Y" switch
     def toggle_flipY():
         is_flipY = modules.globals.flipY_var.get()
         modules.globals.flip_y = is_flipY
-        if hasattr(modules.globals, 'flipY_switch_preview'):
-            modules.globals.flipY_switch_preview.select() if is_flipY else modules.globals.flipY_switch_preview.deselect()
+        refresh_preview() # <--- REFRESH ADDED
 
-    # NOTE: Parent changed to button_row
     flipY_switch = ctk.CTkSwitch(button_row, text=' Flip Y', 
                                  variable=modules.globals.flipY_var, cursor='hand2',
                                  command=toggle_flipY)
     flipY_switch.pack(side='left', padx=5, pady=5)
-
     modules.globals.flipY_switch_preview = flipY_switch
 
     # Function to handle rotation range changes
     def update_rotation_range(size):
         modules.globals.face_rot_range = int(size)
         modules.globals.rot_range_dropdown_preview.set(size)
+        refresh_preview() # <--- REFRESH ADDED
 
-    # Create rotation range label
-    # NOTE: Parent changed to button_row
     face_rot_label = ctk.CTkLabel(button_row, text=" | Rot Range ", font=("Arial", 16))
     face_rot_label.pack(side='left', padx=5, pady=5)
 
@@ -944,23 +967,20 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
         modules.globals.auto_rotate_value = is_auto
         if modules.globals.auto_rotate_switch_main:
             modules.globals.auto_rotate_switch_main.select() if is_auto else modules.globals.auto_rotate_switch_main.deselect()
+        refresh_preview() # <--- REFRESH ADDED
     
-    # NOTE: Parent changed to button_row
     auto_rotate_switch_prev = ctk.CTkSwitch(button_row, text='Auto', 
                                            variable=modules.globals.auto_rotate_var,
                                            command=toggle_auto_rotate_preview,
                                            width=50)
     auto_rotate_switch_prev.pack(side='left', padx=5, pady=5)
-    
     modules.globals.auto_rotate_switch_preview = auto_rotate_switch_prev
 
     # Initialize and create rotation range dropdown
-    # NOTE: Parent changed to button_row
     rot_range_dropdown_preview = ctk.CTkOptionMenu(button_row, values=["0", "90", "180", "-90"],
                                                    variable=modules.globals.rot_range_var,
                                                    command=update_rotation_range,width=10)
     rot_range_dropdown_preview.pack(side='left', padx=5, pady=5)
-
     modules.globals.rot_range_dropdown_preview = rot_range_dropdown_preview 
 
     modules.globals.face_index_range = -1  
@@ -970,19 +990,15 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
     def update_face_index(size):
         modules.globals.face_index_range = int(size)
         modules.globals.face_index_dropdown_preview.set(size)
+        refresh_preview() # <--- REFRESH ADDED
 
-    # Create face index range label
-    # NOTE: Parent changed to button_row
     face_rot_index = ctk.CTkLabel(button_row, text=" | F1 ", font=("Arial", 16))
     face_rot_index.pack(side='left', padx=5, pady=5)
 
-    # Initialize and create rotation range dropdown
-    # NOTE: Parent changed to button_row
     face_index_dropdown_preview = ctk.CTkOptionMenu(button_row, values=["-1","0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
                                                     variable=modules.globals.face_index_var,
                                                     command=update_face_index,width=10)
     face_index_dropdown_preview.pack(side='left', padx=5, pady=5)
-
     modules.globals.face_index_dropdown_preview = face_index_dropdown_preview 
 
     modules.globals.face2_index_range = 0  
@@ -992,73 +1008,73 @@ def create_preview(parent: ctk.CTkToplevel) -> ctk.CTkToplevel:
     def update_face2_index(size):
         modules.globals.face2_index_range = int(size)
         modules.globals.face2_index_dropdown_preview.set(size)
+        refresh_preview() # <--- REFRESH ADDED
 
-    # Create face index range label
-    # NOTE: Parent changed to button_row
     face2_rot_index = ctk.CTkLabel(button_row, text=" | F2 ", font=("Arial", 16))
     face2_rot_index.pack(side='left', padx=5, pady=5)
 
-    # Initialize and create rotation range dropdown
     f2_state = "normal" if modules.globals.both_faces else "disabled"
-    # NOTE: Parent changed to button_row
     face2_index_dropdown_preview = ctk.CTkOptionMenu(button_row, values=["0", "1", "2", "3", "4", "5", "6", "7", "8", "9"],
                                                     variable=modules.globals.face2_index_var,
                                                     command=update_face2_index,width=10,
                                                     state=f2_state)
     face2_index_dropdown_preview.pack(side='left', padx=5, pady=5)
-
     modules.globals.face2_index_dropdown_preview = face2_index_dropdown_preview 
 
     # Forehead logic
     def update_forehead_index(size):
         new_float_value = float(size)
         modules.globals.face_forehead_var = new_float_value
+        refresh_preview() # <--- REFRESH ADDED
 
-    # NOTE: Parent changed to button_row
     face_forehead_index = ctk.CTkLabel(button_row, text=" | Forehead ", font=("Arial", 16))
     face_forehead_index.pack(side='left', padx=5, pady=5)
 
-    # Initialize and create rotation range dropdown
     face_forehead_size_var = ctk.StringVar(value="0.1")
-    # NOTE: Parent changed to button_row
     face_forehead_index_dropdown_preview = ctk.CTkOptionMenu(button_row, values=["0.1","0.2", "0.3", "0.4", "0.5"],
                                                     variable=face_forehead_size_var,
                                                     command=update_forehead_index,width=10)
     face_forehead_index_dropdown_preview.pack(side='left', padx=5, pady=5)
 
-    # --- 2. Create the Hotkey Label (Bottom Row) ---
-    # This places the text exactly where you drew the red circle
+    # Hotkeys label
     hotkey_text = "Hotkeys: Auto Track (A) | Reset Track (T) | Mouth Mask (M) | Mask Face 1-10 (1-0)"
     hotkey_index = ctk.CTkLabel(switch_frame, text=hotkey_text, font=("Arial", 12), text_color="gray")
     hotkey_index.pack(side='top', fill='x', padx=10, pady=(0, 5), anchor='w')
 
-    preview_label_cam = ctk.CTkLabel(preview, text=None)
-    preview_label_cam.pack(fill='y', expand=True)
+    # Slider and Display Container
+    preview_slider = ctk.CTkSlider(preview, from_=0, to=0, command=lambda frame_value: update_preview(frame_value))
+    preview_slider.pack(fill='x', side='bottom', padx=10, pady=5)
+    preview_slider.pack_forget() 
 
-    # Store the original height of the switch_frame
-    switch_frame.update()  # Ensure the frame has been rendered to get its height
+    display_frame = ctk.CTkFrame(preview, fg_color="transparent")
+    display_frame.pack(fill='both', expand=True)
+    display_frame.pack_propagate(False)
+
+    preview_label_cam = ctk.CTkLabel(display_frame, text=None)
+    preview_label_cam.pack(fill='both', expand=True)
+    
+    preview_label = preview_label_cam 
+
+    switch_frame.update() 
     original_height = switch_frame.winfo_height()
 
-    # Double-click event handling
     is_switch_frame_visible = True
 
     def on_double_click(event):
         nonlocal is_switch_frame_visible
         if is_switch_frame_visible:
-            # Hide the switch_frame
             switch_frame.pack_propagate(False)
             switch_frame.configure(height=0)
         else:
-            # Restore the switch_frame
             switch_frame.pack_propagate(True)
             switch_frame.configure(height=original_height)
         is_switch_frame_visible = not is_switch_frame_visible
 
-    preview.bind("<Double-Button-1>", on_double_click)  # Bind double-click event
-    
-    setup_hotkeys(preview) # Register Hotkeys for Preview Window
+    preview.bind("<Double-Button-1>", on_double_click)  
+    setup_hotkeys(preview) 
 
     return preview
+    
 def update_status(text: str) -> None:
     status_label.configure(text=text)
     ROOT.update()
@@ -1070,7 +1086,7 @@ def select_source_path() -> None:
     global RECENT_DIRECTORY_SOURCE, img_ft, vid_ft
 
     PREVIEW.withdraw()
-    PREVIEW_IMAGE.withdraw()
+    # PREVIEW_IMAGE.withdraw()
     source_path = ctk.filedialog.askopenfilename(title='select an source image', initialdir=RECENT_DIRECTORY_SOURCE, filetypes=[img_ft])
     if is_image(source_path):
         modules.globals.source_path = source_path
@@ -1107,36 +1123,13 @@ def fliter(*args):
         modules.globals.use_ink_filter_white=False
         modules.globals.use_ink_filter_black=False
         modules.globals.use_black_lines=False
-
-
-# def swap_faces_paths() -> None:
-#     global RECENT_DIRECTORY_SOURCE, RECENT_DIRECTORY_TARGET
-
-#     source_path = modules.globals.source_path
-#     target_path = modules.globals.target_path
-
-#     if not is_image(source_path) or not is_image(target_path):
-#         return
-
-#     modules.globals.source_path = target_path
-#     modules.globals.target_path = source_path
-
-#     RECENT_DIRECTORY_SOURCE = os.path.dirname(modules.globals.source_path)
-#     RECENT_DIRECTORY_TARGET = os.path.dirname(modules.globals.target_path)
-
-#     # PREVIEW.withdraw()
-
-#     source_image = render_image_preview(modules.globals.source_path, (200, 200))
-#     source_label.configure(image=source_image)
-
-#     target_image = render_image_preview(modules.globals.target_path, (200, 200))
-#     target_label.configure(image=target_image)
+    refresh_preview()
 
 def select_target_path() -> None:
     global RECENT_DIRECTORY_TARGET, img_ft, vid_ft
 
     PREVIEW.withdraw()
-    PREVIEW_IMAGE.withdraw()
+    # PREVIEW_IMAGE.withdraw()
     target_path = ctk.filedialog.askopenfilename(title='select an target image or video', initialdir=RECENT_DIRECTORY_TARGET, filetypes=[img_ft, vid_ft])
     if is_image(target_path):
         modules.globals.target_path = target_path
@@ -1227,9 +1220,8 @@ def render_video_preview(video_path: str, size: Tuple[int, int], frame_number: i
     cv2.destroyAllWindows()
 
 def toggle_preview() -> None:
-    if PREVIEW_IMAGE.state() == 'normal':
-        PREVIEW_IMAGE.withdraw()
-    elif PREVIEW.state() == 'normal':
+    # Simplified to just handle the main PREVIEW window
+    if PREVIEW.state() == 'normal':
         PREVIEW.withdraw()
     elif modules.globals.source_path and modules.globals.target_path:
         init_preview()
@@ -1253,21 +1245,51 @@ def init_preview() -> None:
 def update_preview(frame_number: int = 0) -> None:
     if modules.globals.source_path and modules.globals.target_path:
         update_status('Processing...')
-        temp_frame = get_video_frame(modules.globals.target_path, frame_number)
+        
+        # (Your previous fix for Image/Video loading)
+        if is_image(modules.globals.target_path):
+            temp_frame = cv2.imread(modules.globals.target_path)
+            # Ensure slider is hidden for images
+            if preview_slider: preview_slider.pack_forget() 
+        else:
+            temp_frame = get_video_frame(modules.globals.target_path, frame_number)
+            # Ensure slider is shown for videos
+            if preview_slider: preview_slider.pack(fill='x', side='bottom')
+
+        if temp_frame is None:
+            update_status('Error: Could not load target file.')
+            return
+
         if modules.globals.nsfw_filter and check_and_ignore_nsfw(temp_frame):
             return
         
         # Initialize variables for the selected face/s image. 
-        # Source image can have one face or two faces we simply detect face from left of frame
-        # then right of frame. This insures we always have a face to work with
         source_images: List[Face] = []
         if modules.globals.source_path:
-           
             source_image = cv2.imread(modules.globals.source_path)
             faces = get_many_faces(source_image)
             if faces:
                 # sort faces from left to right then slice max 10
                 source_images = sorted(faces, key=lambda face: face.bbox[0])[:20]
+
+        # --- COPY OF TOOLBAR LOGIC FROM WEBCAM_PREVIEW ---
+        # This ensures F1 and F2 dropdowns populate correctly based on source faces
+        if source_images:
+            num_faces = len(source_images)
+            dropdown_values = ["-1"] + [str(i) for i in range(num_faces)]
+            dropdown2_values = [str(i) for i in range(num_faces)]
+            
+            if modules.globals.face_index_dropdown_preview:
+                modules.globals.face_index_dropdown_preview.configure(values=dropdown_values)
+                # We update the values but keep current selection or default to -1/0
+                if modules.globals.face_index_var.get() not in dropdown_values:
+                     modules.globals.face_index_var.set("-1")
+            
+            if modules.globals.face2_index_dropdown_preview:
+                modules.globals.face2_index_dropdown_preview.configure(values=dropdown2_values)
+                if modules.globals.face2_index_var.get() not in dropdown2_values:
+                    modules.globals.face2_index_var.set("0")
+        # -------------------------------------------------
 
         # no face found
         if not source_images:
@@ -1280,19 +1302,24 @@ def update_preview(frame_number: int = 0) -> None:
             temp_frame = cv2.flip(temp_frame, 0)
 
         for frame_processor in get_frame_processors_modules(modules.globals.frame_processors):
-            temp_frame = frame_processor.process_frame(source_images,
-                temp_frame
-            )
-        # Get current preview window size
-        # current_width = PREVIEW_IMAGE.winfo_width()
-        # current_height = PREVIEW_IMAGE.winfo_height()
-        temp_frame = fit_image_to_preview(temp_frame, PREVIEW_MAX_WIDTH, PREVIEW_MAX_HEIGHT)
+            temp_frame = frame_processor.process_frame(source_images, temp_frame)
+            
+        # Use PREVIEW window size instead of fixed constant for better responsiveness
+        current_width = PREVIEW.winfo_width() if PREVIEW.winfo_width() > 1 else PREVIEW_MAX_WIDTH
+        current_height = PREVIEW.winfo_height() if PREVIEW.winfo_height() > 1 else PREVIEW_MAX_HEIGHT
+
+        temp_frame = fit_image_to_preview(temp_frame, current_width, current_height)
         image = Image.fromarray(cv2.cvtColor(temp_frame, cv2.COLOR_BGR2RGB))
-        image = ImageOps.contain(image, (PREVIEW_MAX_WIDTH, PREVIEW_MAX_HEIGHT), Image.LANCZOS)
+        
+        # Logic to keep image contained within window
+        image = ImageOps.contain(image, (current_width, current_height), Image.LANCZOS)
+        
         image = ctk.CTkImage(image, size=image.size)
         preview_label.configure(image=image)
         update_status('Processing succeed!')
-        PREVIEW_IMAGE.deiconify()
+        
+        # USE PREVIEW WINDOW (The one with the toolbar)
+        PREVIEW.deiconify()
 
 def webcam_preview():
     if modules.globals.source_path is None:
@@ -1486,6 +1513,8 @@ def both_faces(*args):
     modules.globals.face_index_dropdown_preview.set(-1)
 
     face_index_range=0
+    refresh_preview()
+
 def many_faces(*args):
     global face_tracking_value
     size = many_faces_var.get()
@@ -1514,6 +1543,8 @@ def many_faces(*args):
         # pseudo_face_var.set(False)  # Update the switch state
         # face_tracking()  # Call face_tracking to update UI elements
     clear_face_tracking_data()
+
+    refresh_preview()
 
 def face_tracking(*args):
     global pseudo_face_switch, stickiness_dropdown, pseudo_threshold_dropdown, clear_tracking_button,pseudo_face_var
@@ -1558,22 +1589,27 @@ def face_tracking(*args):
 
 
     clear_face_tracking_data()
+    refresh_preview()
 
 def mask_size(*args):
     size = mask_size_var.get()
     modules.globals.mask_size = int(size)
+    refresh_preview()
 
 def mask_down_size(*args):
     size = mask_down_size_var.get()
     modules.globals.mask_down_size = float(size)
+    refresh_preview()
 
 def mask_feather_ratio_size(*args):
     size = mask_feather_ratio_var.get()
     modules.globals.mask_feather_ratio = int(size)
+    refresh_preview()
 
 def stickyface_size(*args):
     size = stickyface_var.get()
     modules.globals.sticky_face_value = float(size)
+    refresh_preview()
     
 def flip_faces(*args):
     size = flip_faces_value.get()
@@ -1589,6 +1625,7 @@ def flip_faces(*args):
 
     if modules.globals.face_tracking:
         clear_face_tracking_data()
+    refresh_preview()
 
 def detect_faces_right(*args):
     size = detect_face_right_value.get()
@@ -1600,26 +1637,31 @@ def detect_faces_right(*args):
     
     if modules.globals.face_tracking:
         clear_face_tracking_data()
+    refresh_preview()
 
 
 def stickiness_factor_size(*args):
     size = stickyface_var.get()
     modules.globals.sticky_face_value = float(size)
+    refresh_preview()
 
 def pseudo_threshold_size(*args):
     size = pseudo_threshold_var.get()
     modules.globals.pseudo_face_threshold = float(size)
+    refresh_preview()
 
 def clear_face_tracking_data(*args):
     frame_processors = get_frame_processors_modules(modules.globals.frame_processors)
     for frame_processor in frame_processors:
         if hasattr(frame_processor, 'reset_face_tracking'):
                 frame_processor.reset_face_tracking()
+    refresh_preview()
 
 def face_rot_size(*args):
 
     size = rot_range_var.get()
     modules.globals.face_rot_range = int(size)
+    refresh_preview()
 
 # --- HOTKEY HANDLERS ---
 
@@ -1642,6 +1684,7 @@ def setup_hotkeys(window):
     window.bind('8', lambda e: toggle_mouth_mask_face_hotkey(7))
     window.bind('9', lambda e: toggle_mouth_mask_face_hotkey(8))
     window.bind('0', lambda e: toggle_mouth_mask_face_hotkey(9))
+    
 
 def toggle_face_tracking_hotkey():
     if 'face_tracking_value' in globals():
@@ -1650,10 +1693,12 @@ def toggle_face_tracking_hotkey():
         modules.globals.face_tracking = val
         face_tracking(None) # Update UI state
         update_status(f"Auto Face Tracking: {'On' if val else 'Off'}")
+        refresh_preview()
 
 def reset_face_tracking_hotkey():
     clear_face_tracking_data()
     update_status("Face Tracking Reset")
+    refresh_preview()
 
 def toggle_mouth_mask_global_hotkey():
     if hasattr(modules.globals, 'mouth_mask_var'):
@@ -1661,8 +1706,10 @@ def toggle_mouth_mask_global_hotkey():
         modules.globals.mouth_mask_var.set(val)
         modules.globals.mouth_mask = val
         update_status(f"Mouth Mask: {'On' if val else 'Off'}")
+        refresh_preview()
 
 def toggle_mouth_mask_face_hotkey(index):
     modules.globals.mouth_mask_enabled_faces[index] = not modules.globals.mouth_mask_enabled_faces[index]
     state = "On" if modules.globals.mouth_mask_enabled_faces[index] else "Off"
-    update_status(f"Mouth Mask Face {index + 1}: {state}")    
+    update_status(f"Mouth Mask Face {index + 1}: {state}")
+    refresh_preview()    
