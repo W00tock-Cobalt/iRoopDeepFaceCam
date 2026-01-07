@@ -1,1 +1,53 @@
-Deepfake and Virtual Camera Implementation GuideThe following tools and configurations enable high-performance face-swapping and remote streaming for live video calls (KYC, testing, or demonstrations).Core Software and PerformanceDeepFaceLab / DeepFaceLive: Compatible with CUDA out of the box. macOS (MPS) support requires additional configuration but is functional.Performance Metric: An M4 Max chip can achieve 30fps at 224 resolution.FaceFusion / iRoopDeepFaceCam: Effective alternatives for face-swapping without the need for extensive model training.Performance Metric: An NVIDIA 2080ti achieves 20–30fps.Virtual Camera and Audio RoutingTo inject deepfake feeds into communication platforms like Zoom, use OBS Studio to create a virtual camera device. For environments with device allow-listing or geofencing, remote feeds can be tunneled into a local webcam via VDO.Ninja.Audio Tunneling Tools:macOS: BlackHoleWindows: VB-Audio CABLE (VAC)Remote Streaming and ConnectivityFor streaming from a GPU-enabled server to a local laptop, the NDI plugin for OBS is utilized.ComponentRecommendationProtocolUse TCP rather than UDP to avoid common NDI streaming bugs.PluginOBS-NDI for remote GPU processing.LogicProcess the video on a high-spec server and output the result to a client device via NDI.
+# Deepfake Live-Streaming & Virtual Camera Setup
+
+This repository outlines the technical stack and configuration required to implement real-time deepfakes for live video calls (e.g., Zoom, KYC verification). This setup supports high-performance face-swapping on both NVIDIA (CUDA) and Apple Silicon (MPS) hardware.
+
+---
+
+## Core Hardware & Performance Benchmarks
+
+Real-time performance varies based on hardware architecture and model resolution.
+
+| Hardware | Software | Performance | Notes |
+| --- | --- | --- | --- |
+| **Apple M4 Max** | DeepFaceLive | 30 FPS @ 224px | Requires MPS configuration |
+| **NVIDIA 2080ti** | FaceFusion / iRoop | 20–30 FPS | Standard CUDA execution |
+
+---
+
+## Software Stack
+
+### 1. Face Swapping Tools
+
+* [DeepFaceLive](https://github.com/iperov/DeepFaceLive): Best for high-resolution models. Works out-of-the-box with CUDA; requires "fiddling" for macOS MPS.
+* [FaceFusion](https://github.com/facefusion/facefusion): A comprehensive tool for face-swapping and enhancement.
+* [iRoopDeepFaceCam](https://github.com/iVideoGameBoss/iRoopDeepFaceCam): A streamlined face-swap alternative that often removes the need for extensive model training.
+
+### 2. Video & Audio Routing
+
+* **OBS Studio:** Used as the primary hub to manage video layers and output a **Virtual Camera**.
+* **VDO.Ninja:** Enables injecting a remote live feed into a local webcam, useful for bypassing geofencing or device allow-listing.
+* **Audio Drivers:**
+* **macOS:** [BlackHole](https://github.com/ExistentialAudio/BlackHole)
+* **Windows:** [VB-Audio CABLE](https://vb-audio.com/Cable/)
+
+
+
+### 3. Remote Streaming (Server-to-Client)
+
+To run heavy processing on a GPU server and stream the output to a local laptop:
+
+* **Plugin:** [OBS-NDI](https://github.com/obs-ndi/obs-ndi)
+* **Protocol:** Use **TCP** instead of UDP to ensure stability and avoid common NDI streaming bugs.
+
+---
+
+## Implementation Workflow
+
+1. **Processing:** Run the deepfake software (DeepFaceLive/FaceFusion) on the GPU-enabled machine.
+2. **Capture:** Use OBS Studio to capture the software's output window.
+3. **Tunneling (Optional):** If the destination requires a specific local device, use VDO.Ninja to send the server feed to the local client.
+4. **Virtual Output:** Start the **OBS Virtual Camera** and select it as the input in the target application (Zoom, etc.).
+5. **Audio:** Route audio through BlackHole or VB-Audio CABLE to ensure synchronized sound alongside the video feed.
+
+---
